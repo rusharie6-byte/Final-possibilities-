@@ -1,0 +1,6 @@
+{
+  "name": "Possibilities Shell",
+  "description": "A living operating environment centered around the Orb with interactive radial Nexus navigation and purple glow identity.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
