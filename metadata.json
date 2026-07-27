@@ -1,6 +1,6 @@
 {
   "name": "Possibilities Shell",
   "description": "Possibilities companion living operating environment centered around the Living Orb with independent voice toggles, natural language intent engine, and responsive screen scaling.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": ["microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

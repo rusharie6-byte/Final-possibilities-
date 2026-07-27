@@ -124,65 +124,98 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
     };
   }, []);
 
-  // Speech Recognition Setup
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const SpeechRecognition =
-        (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-      if (SpeechRecognition) {
-        const recognition = new SpeechRecognition();
-        recognition.continuous = false;
-        recognition.interimResults = true;
-        recognition.lang = 'en-US';
+  // Speech Recognition Setup & Handler
+  const startListening = () => {
+    if (typeof window === 'undefined') return;
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
-        recognition.onresult = (event: any) => {
-          let transcript = '';
-          for (let i = event.resultIndex; i < event.results.length; i++) {
-            transcript += event.results[i][0].transcript;
-          }
-          setInputText(transcript);
-          transcriptBufferRef.current = transcript;
-        };
-
-        recognition.onerror = (err: any) => {
-          console.warn('Speech recognition error:', err);
-          setIsListening(false);
-        };
-
-        recognition.onend = () => {
-          setIsListening(false);
-          const textToSubmit = transcriptBufferRef.current.trim();
-          if (textToSubmit) {
-            transcriptBufferRef.current = '';
-            handleUserIntent(textToSubmit);
-          }
-        };
-
-        recognitionRef.current = recognition;
-      }
-    }
-  }, []);
-
-  const toggleHumanMic = () => {
-    if (!recognitionRef.current) {
+    if (!SpeechRecognition) {
       alert('Speech recognition is not supported in this browser. Please use text input.');
       return;
     }
 
-    if (isListening) {
-      recognitionRef.current.stop();
-      setIsListening(false);
-      audioSynth.playNodeClick(400);
-    } else {
+    // Stop any existing instance
+    if (recognitionRef.current) {
       try {
-        transcriptBufferRef.current = '';
-        recognitionRef.current.start();
-        setIsListening(true);
-        audioSynth.playNodeClick(800);
-        audioSynth.triggerHaptic([30, 30]);
-      } catch (err) {
-        console.warn('Speech recognition start failed:', err);
+        recognitionRef.current.abort();
+      } catch (e) {
+        // ignore
       }
+      recognitionRef.current = null;
+    }
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+
+      transcriptBufferRef.current = '';
+
+      let lastUpdate = 0;
+      recognition.onresult = (event: any) => {
+        let transcript = '';
+        let isFinal = false;
+
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          transcript += event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            isFinal = true;
+          }
+        }
+
+        transcriptBufferRef.current = transcript;
+
+        // Throttle UI text updates to max once every 150ms to prevent React re-render lag
+        const now = Date.now();
+        if (isFinal || now - lastUpdate > 150) {
+          lastUpdate = now;
+          setInputText(transcript);
+        }
+      };
+
+      recognition.onerror = (err: any) => {
+        console.warn('Speech recognition error:', err);
+        setIsListening(false);
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+        const textToSubmit = transcriptBufferRef.current.trim();
+        if (textToSubmit) {
+          setInputText(textToSubmit);
+          transcriptBufferRef.current = '';
+          handleUserIntent(textToSubmit);
+        }
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+      setIsListening(true);
+      audioSynth.triggerHaptic([30, 30]);
+    } catch (err) {
+      console.warn('Speech recognition start failed:', err);
+      setIsListening(false);
+    }
+  };
+
+  const stopListening = () => {
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch (e) {
+        // ignore
+      }
+    }
+    setIsListening(false);
+  };
+
+  const toggleHumanMic = () => {
+    if (isListening) {
+      stopListening();
+    } else {
+      startListening();
     }
   };
 
