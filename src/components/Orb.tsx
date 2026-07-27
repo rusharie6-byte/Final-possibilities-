@@ -4,8 +4,14 @@ import { OrbMode, SystemMode } from '../types';
 import { audioSynth } from '../utils/audioSynthesizer';
 import { perfManager } from '../utils/performance';
 
+const orbImageUrl = new URL('../assets/images/crystal_orb_asset_1785163496547.jpg', import.meta.url).href;
+
+export type OrbState = 'idle' | 'listening' | 'processing' | 'speaking';
+
 interface OrbProps {
-  mode: OrbMode;
+  mode?: OrbMode | 'small' | 'chat';
+  state?: OrbState;
+  audioLevel?: number; // 0.0 to 1.0 audio reactivity level
   systemMode?: SystemMode;
   onClick?: () => void;
   onLongPress?: () => void;
@@ -16,13 +22,15 @@ interface OrbProps {
 }
 
 export const Orb: React.FC<OrbProps> = ({
-  mode,
+  mode = 'hero',
+  state = 'idle',
+  audioLevel = 0,
   systemMode = 'calm',
   onClick,
   onLongPress,
   isEnergized = false,
   pulseScale = 1.0,
-  glowExpansionPx = 40,
+  glowExpansionPx = 50,
   className = '',
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -48,39 +56,50 @@ export const Orb: React.FC<OrbProps> = ({
   const getSize = () => {
     switch (mode) {
       case 'hero':
-        return 220;
+        return 430; // Enriched visual gravity — Possibilities living presence
       case 'nexus':
-        return 140;
-      case 'floating':
-        return 80;
-      case 'minimized':
-        return 50;
-      default:
         return 180;
+      case 'floating':
+        return 100;
+      case 'chat':
+        return 75;
+      case 'small':
+      case 'minimized':
+        return 55;
+      default:
+        return 220;
     }
   };
 
-  const canvasSize = getSize() + 100; // Extra padding for spike expansion and bloom glow
-  const baseRadius = getSize() / 2;
+  const baseSize = getSize();
+  const canvasSize = baseSize + 280; // Expansive canvas padding for deep atmospheric purple aura bloom
+  const baseRadius = baseSize / 2;
 
-  // System mode color accents
+  // System mode or state color accents (#7B2FFF core, #A020F0 spikes, #4B0082 depth)
   const getColors = () => {
     switch (systemMode) {
       case 'intelligence':
-        return { core: '#E0E7FF', innerGlow: '#818CF8', outerGlow: '#6366F1', spikes: '#C7D2FE' };
+        return { core: '#E0E7FF', innerGlow: '#818CF8', outerGlow: '#6366F1', spikes: 'rgba(199, 210, 254, 0.9)' };
       case 'focus':
-        return { core: '#F5D0FE', innerGlow: '#C084FC', outerGlow: '#A855F7', spikes: '#E9D5FF' };
+        return { core: '#F5D0FE', innerGlow: '#C084FC', outerGlow: '#A855F7', spikes: 'rgba(233, 213, 255, 0.9)' };
       case 'overdrive':
-        return { core: '#FFEDD5', innerGlow: '#F97316', outerGlow: '#D97706', spikes: '#FDBA74' };
+        return { core: '#FFEDD5', innerGlow: '#F97316', outerGlow: '#D97706', spikes: 'rgba(253, 186, 116, 0.9)' };
       case 'calm':
       default:
-        return { core: '#FAF5FF', innerGlow: '#C084FC', outerGlow: '#A855F7', spikes: '#E9D5FF' };
+        return {
+          core: '#8B5CF6',
+          brightCore: '#C084FC',
+          deepCore: '#581C87',
+          innerGlow: 'rgba(168, 85, 247, 0.85)',
+          outerGlow: 'rgba(147, 51, 234, 0.65)',
+          spikes: 'rgba(192, 132, 252, 0.9)',
+        };
     }
   };
 
   const colors = getColors();
 
-  // Canvas render loop for living 3D glass orb with plasma filaments, multi-layer depth parallax, and specular reflections
+  // Canvas render loop for living 3D crystal glass orb
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -88,26 +107,25 @@ export const Orb: React.FC<OrbProps> = ({
     if (!ctx) return;
 
     let animationFrameId: number;
-    let rotationAngle = 0;
     let time = 0;
+    let processSweepAngle = 0;
 
-    // Multi-depth particle layers (Foreground, Midground, Background)
-    const particles = Array.from({ length: 36 }).map((_, i) => ({
-      layer: i % 3, // 0 = back (slow, dark), 1 = mid, 2 = front (fast, bright)
-      angle: Math.random() * Math.PI * 2,
-      dist: baseRadius * (0.6 + Math.random() * 0.9),
-      speed: (Math.random() * 0.012 + 0.003) * (Math.random() > 0.5 ? 1 : -1),
-      size: Math.random() * 2.5 + 0.8,
-      alpha: Math.random() * 0.7 + 0.3,
-      z: Math.random() * 2 - 1, // depth Z index -1 to 1
-    }));
+    const img = new Image();
+    img.src = orbImageUrl;
 
-    // Living plasma strands inside core
-    const strands = Array.from({ length: 7 }).map((_, i) => ({
-      phase: i * (Math.PI / 3.5),
-      speed: 0.02 + Math.random() * 0.02,
-      amplitude: 0.15 + Math.random() * 0.25,
-      frequency: 2 + Math.floor(Math.random() * 3),
+    const isHigh = effectiveMode === 'high';
+    const particleCount = isHigh ? 50 : 25;
+
+    // Orbiting, bright, living stardust particles inside and around Possibilities
+    const stardust = Array.from({ length: particleCount }).map((_, i) => ({
+      orbitRadiusRatio: 0.2 + Math.random() * 0.75,
+      orbitAngle: (i / particleCount) * Math.PI * 2,
+      orbitSpeed: (0.003 + Math.random() * 0.006) * (Math.random() < 0.5 ? 1 : -1),
+      tiltAngle: Math.random() * Math.PI,
+      size: Math.random() * 1.5 + 0.5,
+      baseAlpha: Math.random() * 0.75 + 0.25,
+      twinkleSpeed: 1.2 + Math.random() * 2.5,
+      color: Math.random() < 0.5 ? 'rgba(255, 255, 255, ' : Math.random() < 0.8 ? 'rgba(233, 213, 255, ' : 'rgba(192, 132, 252, ',
     }));
 
     const render = () => {
@@ -118,233 +136,194 @@ export const Orb: React.FC<OrbProps> = ({
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      time += 0.025;
-      rotationAngle += 0.2; // REQUIRED SPEC: Rotate 0.2deg per frame
+      time += 0.012; // Calmer, slower time step
+      processSweepAngle += 0.03;
 
-      const isHigh = effectiveMode === 'high';
-
-      // Multi-layer parallax coordinates based on mouse position
+      // Pointer interactive tilt offset
       const mouseX = pointerPos.current.x;
       const mouseY = pointerPos.current.y;
+      const centerX = canvas.width / 2 + mouseX * 0.03;
+      const centerY = canvas.height / 2 + mouseY * 0.03 - 4;
 
-      // Layer centers for 3D illusion
-      const backX = canvas.width / 2 + mouseX * 0.05;
-      const backY = canvas.height / 2 + mouseY * 0.05;
-      const midX = canvas.width / 2 + mouseX * 0.15;
-      const midY = canvas.height / 2 + mouseY * 0.15;
-      const frontX = canvas.width / 2 + mouseX * 0.28;
-      const fontY = canvas.height / 2 + mouseY * 0.28;
+      let stateScaleMultiplier = 1.0;
+      let stateGlowAlpha = 0.75;
 
-      // Organic double-beat heartbeat pulse (ba-bum... ba-bum)
-      const heartCycle = (time * 1.2) % (Math.PI * 2);
-      const heartPulse =
-        Math.exp(-Math.pow(heartCycle - 1, 2) * 8) * 0.12 +
-        Math.exp(-Math.pow(heartCycle - 1.5, 2) * 12) * 0.08;
-      const breathe = 1.0 + heartPulse + Math.sin(time * 0.8) * 0.04;
+      switch (state) {
+        case 'listening':
+          stateScaleMultiplier = 1.0 + Math.sin(time * 3.5) * 0.025 + audioLevel * 0.05;
+          stateGlowAlpha = 0.9 + audioLevel * 0.1;
+          break;
+        case 'processing':
+          stateScaleMultiplier = 1.0 + Math.sin(time * 2.8) * 0.02;
+          stateGlowAlpha = 0.85;
+          break;
+        case 'speaking':
+          stateScaleMultiplier = 1.0 + Math.sin(time * 3.0) * 0.025 + audioLevel * 0.04;
+          stateGlowAlpha = 0.85;
+          break;
+        case 'idle':
+        default:
+          // Very slow, calm, deep 8-second breathing motion
+          stateScaleMultiplier = 1.0 + Math.sin(time * 0.8) * 0.028;
+          stateGlowAlpha = 0.7 + Math.sin(time * 0.6) * 0.12;
+          break;
+      }
 
-      // 1. BACK DEPTH LAYER: Expanded Volumetric Radial Atmospheric Bloom
-      const glowRadius = (baseRadius + glowExpansionPx + 20) * breathe * (isHovered ? 1.2 : 1.0);
+      const totalRadius = baseRadius * stateScaleMultiplier * pulseScale;
+
+      // ── LAYER 1: GROUNDED DROP SHADOW & DOWNWARD VIOLET AMBIENT REFLECTION ──
+      const shadowY = centerY + totalRadius * 0.94;
+      const shadowRx = totalRadius * 0.9;
+      const shadowRy = totalRadius * 0.22;
+
+      // Dark matte contact shadow
+      const matteShadowGrad = ctx.createRadialGradient(
+        centerX,
+        shadowY,
+        0,
+        centerX,
+        shadowY,
+        shadowRx * 1.2
+      );
+      matteShadowGrad.addColorStop(0, 'rgba(0, 0, 0, 0.95)');
+      matteShadowGrad.addColorStop(0.35, 'rgba(20, 8, 45, 0.85)');
+      matteShadowGrad.addColorStop(0.7, 'rgba(147, 51, 234, 0.2)');
+      matteShadowGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+
+      ctx.beginPath();
+      ctx.ellipse(centerX, shadowY, shadowRx * 1.2, shadowRy * 1.3, 0, 0, Math.PI * 2);
+      ctx.fillStyle = matteShadowGrad;
+      ctx.fill();
+
+      // Soft bright violet ambient floor reflection spot directly beneath orb
+      ctx.beginPath();
+      ctx.ellipse(centerX, shadowY + 2, shadowRx * 0.8, shadowRy * 0.75, 0, 0, Math.PI * 2);
+      const floorGlowGrad = ctx.createRadialGradient(
+        centerX,
+        shadowY + 2,
+        0,
+        centerX,
+        shadowY + 2,
+        shadowRx * 0.8
+      );
+      floorGlowGrad.addColorStop(0, `rgba(253, 224, 71, ${0.45 + Math.sin(time * 1.5) * 0.08})`);
+      floorGlowGrad.addColorStop(0.3, `rgba(216, 180, 254, ${0.5 + Math.sin(time * 1.5) * 0.08})`);
+      floorGlowGrad.addColorStop(0.6, `rgba(168, 85, 247, ${0.3 + Math.sin(time * 1.8) * 0.05})`);
+      floorGlowGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = floorGlowGrad;
+      ctx.fill();
+
+      // Golden ground embers sparkling on the wet floor surface beneath the orb
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      for (let i = 0; i < 18; i++) {
+        const angle = (i / 18) * Math.PI * 2 + time * 0.2;
+        const dist = (0.2 + (i % 5) * 0.18) * shadowRx;
+        const ex = centerX + Math.cos(angle) * dist;
+        const ey = shadowY + Math.sin(angle) * (shadowRy * 0.6);
+        const eAlpha = 0.25 + Math.sin(time * 2 + i) * 0.25;
+        const eSize = 0.8 + (i % 3) * 0.6;
+
+        ctx.beginPath();
+        ctx.arc(ex, ey, eSize, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(253, 224, 71, ${eAlpha})`;
+        ctx.fill();
+      }
+      ctx.restore();
+
+      // ── LAYER 2: INTENSE ATMOSPHERIC VIOLET/MAGENTA BLOOM HALO ──
+      const glowRadius = totalRadius + 140 * (1 + audioLevel * 0.3);
       const outerGlowGrad = ctx.createRadialGradient(
-        backX,
-        backY,
-        baseRadius * 0.1,
-        backX,
-        backY,
+        centerX,
+        centerY,
+        totalRadius * 0.2,
+        centerX,
+        centerY,
         glowRadius
       );
-      outerGlowGrad.addColorStop(0, colors.innerGlow);
-      outerGlowGrad.addColorStop(0.35, `${colors.outerGlow}${isEnergized ? 'FF' : 'B3'}`);
-      outerGlowGrad.addColorStop(0.7, `${colors.outerGlow}44`);
+      outerGlowGrad.addColorStop(0, `rgba(216, 180, 254, ${stateGlowAlpha * 0.75})`);
+      outerGlowGrad.addColorStop(0.3, `rgba(168, 85, 247, ${stateGlowAlpha * 0.5})`);
+      outerGlowGrad.addColorStop(0.65, `rgba(109, 40, 217, ${stateGlowAlpha * 0.22})`);
+      outerGlowGrad.addColorStop(0.85, `rgba(58, 12, 115, ${stateGlowAlpha * 0.08})`);
       outerGlowGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
 
       ctx.beginPath();
-      ctx.arc(backX, backY, glowRadius, 0, Math.PI * 2);
+      ctx.arc(centerX, centerY, glowRadius, 0, Math.PI * 2);
       ctx.fillStyle = outerGlowGrad;
       ctx.fill();
 
-      // 2. MID DEPTH LAYER: Canvas Particle Spikes (12 spikes, rotate 0.2 deg/frame)
-      const spikeCount = isHigh ? 12 : 8;
-      const currentRotationRad = (rotationAngle * Math.PI) / 180;
-
-      for (let i = 0; i < spikeCount; i++) {
-        const spikeAngle = currentRotationRad + (i * (Math.PI * 2)) / spikeCount;
-        const spikeLength =
-          baseRadius *
-          (1.28 + Math.sin(time * 2.2 + i) * 0.18 + heartPulse * 0.5) *
-          (isEnergized ? 1.45 : 1.0);
-        const spikeAlpha = 0.35 + Math.sin(time * 2.5 + i) * 0.35 + (isEnergized ? 0.35 : 0);
-
-        const tipX = midX + Math.cos(spikeAngle) * spikeLength;
-        const tipY = midY + Math.sin(spikeAngle) * spikeLength;
-
-        const baseAngleLeft = spikeAngle - 0.09;
-        const baseAngleRight = spikeAngle + 0.09;
-
-        const baseLeftX = midX + Math.cos(baseAngleLeft) * (baseRadius * 0.82);
-        const baseLeftY = midY + Math.sin(baseAngleLeft) * (baseRadius * 0.82);
-
-        const baseRightX = midX + Math.cos(baseAngleRight) * (baseRadius * 0.82);
-        const baseRightY = midY + Math.sin(baseAngleRight) * (baseRadius * 0.82);
-
+      // ── LAYER 3: PHOTOREALISTIC 3D ORB (CIRCULAR CLIPPED — NO RECTANGULAR EDGES) ──
+      if (img.complete && img.naturalWidth > 0) {
+        ctx.save();
         ctx.beginPath();
-        ctx.moveTo(baseLeftX, baseLeftY);
-        ctx.lineTo(tipX, tipY);
-        ctx.lineTo(baseRightX, baseRightY);
-        ctx.closePath();
+        ctx.arc(centerX, centerY, totalRadius * 0.98, 0, Math.PI * 2);
+        ctx.clip();
 
-        const spikeGrad = ctx.createLinearGradient(midX, midY, tipX, tipY);
-        spikeGrad.addColorStop(0, colors.outerGlow);
-        spikeGrad.addColorStop(0.5, colors.spikes);
-        spikeGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
-
-        ctx.fillStyle = spikeGrad;
-        ctx.globalAlpha = Math.min(1.0, Math.max(0, spikeAlpha));
-        ctx.fill();
-        ctx.globalAlpha = 1.0;
+        const renderSize = totalRadius * 2.1;
+        ctx.drawImage(
+          img,
+          centerX - renderSize / 2,
+          centerY - renderSize / 2,
+          renderSize,
+          renderSize
+        );
+        ctx.restore();
       }
 
-      // 3. MID-FRONT LAYER: 3D Tilting Orbital Ring
-      ctx.save();
-      ctx.translate(midX, midY);
-      ctx.rotate(time * 0.15);
-      ctx.scale(1.0, 0.35);
-
-      ctx.beginPath();
-      ctx.arc(0, 0, baseRadius * 1.3 * breathe, 0, Math.PI * 2);
-      ctx.strokeStyle = colors.spikes;
-      ctx.lineWidth = 1.2;
-      ctx.globalAlpha = 0.4 + Math.sin(time * 1.5) * 0.2;
-      ctx.setLineDash([6, 12]);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.restore();
-
-      // 4. MICRO PARTICLES
-      particles.forEach((p) => {
-        p.angle += p.speed;
-        const pX = midX + (p.layer === 2 ? mouseX * 0.1 : 0);
-        const pY = midY + (p.layer === 2 ? mouseY * 0.1 : 0);
-        const px = pX + Math.cos(p.angle) * p.dist * breathe;
-        const py = pY + Math.sin(p.angle) * p.dist * breathe;
-
-        ctx.beginPath();
-        ctx.arc(px, py, p.size * (p.layer === 2 ? 1.4 : p.layer === 1 ? 1.0 : 0.7), 0, Math.PI * 2);
-        ctx.fillStyle = p.layer === 2 ? '#FFFFFF' : colors.spikes;
-        ctx.globalAlpha = p.alpha * (0.5 + Math.sin(time * 2 + p.angle) * 0.5);
-        ctx.fill();
-        ctx.globalAlpha = 1.0;
-      });
-
-      // 5. CORE SPHERE
-      const coreRadius = baseRadius * breathe * pulseScale;
-
-      const coreGrad = ctx.createRadialGradient(
-        midX - coreRadius * 0.3,
-        midY - coreRadius * 0.3,
-        coreRadius * 0.05,
-        midX,
-        midY,
-        coreRadius
-      );
-      coreGrad.addColorStop(0, '#FFFFFF');
-      coreGrad.addColorStop(0.2, colors.core);
-      coreGrad.addColorStop(0.5, colors.innerGlow);
-      coreGrad.addColorStop(0.85, colors.outerGlow);
-      coreGrad.addColorStop(1.0, '#150028');
-
-      ctx.beginPath();
-      ctx.arc(midX, midY, coreRadius, 0, Math.PI * 2);
-      ctx.fillStyle = coreGrad;
-      if (isHigh) {
-        ctx.shadowColor = colors.outerGlow;
-        ctx.shadowBlur = isEnergized ? 50 : 30;
-      }
-      ctx.fill();
-      if (isHigh) ctx.shadowBlur = 0;
-
-      // 5b. Living Organic Plasma Filaments inside Core
+      // ── LAYER 4: INTERNAL FLOWING ENERGY NEBULA HIGHLIGHTS ──
       ctx.save();
       ctx.beginPath();
-      ctx.arc(midX, midY, coreRadius * 0.95, 0, Math.PI * 2);
+      ctx.arc(centerX, centerY, totalRadius * 0.94, 0, Math.PI * 2);
       ctx.clip();
 
-      strands.forEach((st) => {
+      // Swirling internal energy core
+      const swirlX = centerX + Math.cos(time * 0.5) * totalRadius * 0.15;
+      const swirlY = centerY + Math.sin(time * 0.7) * totalRadius * 0.15;
+      const innerEnergyGrad = ctx.createRadialGradient(
+        swirlX,
+        swirlY,
+        0,
+        swirlX,
+        swirlY,
+        totalRadius * 0.8
+      );
+      innerEnergyGrad.addColorStop(0, `rgba(245, 208, 254, ${0.25 + Math.sin(time * 1.2) * 0.08})`);
+      innerEnergyGrad.addColorStop(0.5, `rgba(192, 132, 252, ${0.15 + Math.cos(time * 0.9) * 0.05})`);
+      innerEnergyGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = innerEnergyGrad;
+      ctx.fill();
+
+      // ── LAYER 5: CONTINUOUS ORBITING STARDUST PARTICLES ──
+      ctx.globalCompositeOperation = 'lighter';
+      stardust.forEach((p) => {
+        p.orbitAngle += p.orbitSpeed;
+
+        const rx = totalRadius * p.orbitRadiusRatio;
+        const ry = rx * 0.65;
+
+        // Elliptical 3D orbital projection
+        const cosA = Math.cos(p.orbitAngle);
+        const sinA = Math.sin(p.orbitAngle);
+        const px = centerX + cosA * rx * Math.cos(p.tiltAngle) - sinA * ry * Math.sin(p.tiltAngle);
+        const py = centerY + cosA * rx * Math.sin(p.tiltAngle) + sinA * ry * Math.cos(p.tiltAngle);
+
+        const alpha = Math.min(1.0, Math.max(0.15, p.baseAlpha + Math.sin(time * p.twinkleSpeed + p.orbitAngle) * 0.35));
+
         ctx.beginPath();
-        const strandAngle = st.phase + time * st.speed * 10;
-        const startX = midX + Math.cos(strandAngle) * coreRadius * 0.8;
-        const startY = midY + Math.sin(strandAngle) * coreRadius * 0.8;
-        const endX = midX - Math.cos(strandAngle) * coreRadius * 0.8;
-        const endY = midY - Math.sin(strandAngle) * coreRadius * 0.8;
-
-        const ctrlX = midX + Math.sin(time * 3 + st.phase) * coreRadius * st.amplitude;
-        const ctrlY = midY + Math.cos(time * 3 + st.phase) * coreRadius * st.amplitude;
-
-        ctx.moveTo(startX, startY);
-        ctx.quadraticCurveTo(ctrlX, ctrlY, endX, endY);
-        ctx.strokeStyle = '#FFFFFF';
-        ctx.lineWidth = 1.8;
-        ctx.globalAlpha = 0.3 + Math.sin(time * 4 + st.phase) * 0.25;
-        if (isHigh) {
-          ctx.shadowColor = colors.spikes;
-          ctx.shadowBlur = 10;
-        }
-        ctx.stroke();
+        ctx.arc(px, py, p.size, 0, Math.PI * 2);
+        ctx.fillStyle = `${p.color}${alpha})`;
+        ctx.fill();
       });
       ctx.restore();
 
-      // 5c. 3D GLASS SPHERE SPECULAR REFLECTION & DOME GLARE
-      // Top-Left Curved Glass Meniscus Highlight
-      const highlightX = frontX - coreRadius * 0.35;
-      const highlightY = fontY - coreRadius * 0.35;
-      const glassGrad = ctx.createRadialGradient(
-        highlightX,
-        highlightY,
-        0,
-        highlightX,
-        highlightY,
-        coreRadius * 0.7
-      );
-      glassGrad.addColorStop(0, 'rgba(255, 255, 255, 0.85)');
-      glassGrad.addColorStop(0.3, 'rgba(255, 255, 255, 0.35)');
-      glassGrad.addColorStop(0.7, 'rgba(255, 255, 255, 0.05)');
-      glassGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
-
-      ctx.beginPath();
-      ctx.arc(midX, midY, coreRadius, 0, Math.PI * 2);
-      ctx.fillStyle = glassGrad;
-      ctx.fill();
-
-      // Curved Specular Lens Reflection Arc at Top Edge
-      ctx.beginPath();
-      ctx.arc(
-        midX - coreRadius * 0.1,
-        midY - coreRadius * 0.1,
-        coreRadius * 0.82,
-        Math.PI * 1.15,
-        Math.PI * 1.75
-      );
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.75)';
-      ctx.lineWidth = coreRadius * 0.08;
-      ctx.lineCap = 'round';
-      ctx.stroke();
-
-      // Rim Light / Dark Ambient Occlusion Ring at Outer Boundary
-      const rimGrad = ctx.createRadialGradient(
-        midX,
-        midY,
-        coreRadius * 0.88,
-        midX,
-        midY,
-        coreRadius
-      );
-      rimGrad.addColorStop(0, 'rgba(0, 0, 0, 0)');
-      rimGrad.addColorStop(0.8, 'rgba(0, 0, 0, 0.3)');
-      rimGrad.addColorStop(1.0, 'rgba(255, 255, 255, 0.4)');
-
-      ctx.beginPath();
-      ctx.arc(midX, midY, coreRadius, 0, Math.PI * 2);
-      ctx.fillStyle = rimGrad;
-      ctx.fill();
+      // ── LAYER 6: PROCESSING SWEEP RING ──
+      if (state === 'processing') {
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, totalRadius * 1.05, processSweepAngle, processSweepAngle + Math.PI * 0.6);
+        ctx.strokeStyle = 'rgba(233, 213, 255, 0.95)';
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+      }
 
       // Pointer spring dampening
       pointerPos.current.x += (pointerPos.current.targetX - pointerPos.current.x) * 0.08;
@@ -358,7 +337,7 @@ export const Orb: React.FC<OrbProps> = ({
     return () => {
       cancelAnimationFrame(animationFrameId);
     };
-  }, [baseRadius, glowExpansionPx, isEnergized, pulseScale, isHovered, systemMode]);
+  }, [baseRadius, glowExpansionPx, isEnergized, pulseScale, isHovered, systemMode, state, audioLevel, effectiveMode]);
 
   const handlePointerMove = (e: React.PointerEvent) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -374,7 +353,7 @@ export const Orb: React.FC<OrbProps> = ({
     setChargeProgress(0);
 
     const startTime = Date.now();
-    const duration = 480; // 480ms hold threshold for long press
+    const duration = 480;
 
     const updateCharge = () => {
       const elapsed = Date.now() - startTime;
@@ -436,6 +415,7 @@ export const Orb: React.FC<OrbProps> = ({
       style={{
         width: canvasSize,
         height: canvasSize,
+        filter: 'drop-shadow(0 0 60px rgba(123, 47, 255, 0.6)) drop-shadow(0 0 120px rgba(123, 47, 255, 0.3))',
       }}
       whileHover={{ scale: 1.05 }}
       whileTap={{ scale: 0.95 }}
@@ -445,7 +425,7 @@ export const Orb: React.FC<OrbProps> = ({
       onPointerEnter={() => setIsHovered(true)}
       onPointerLeave={handlePointerLeave}
       role="button"
-      aria-label="Possibilities Central Orb"
+      aria-label="Possibilities Central Living Orb"
       tabIndex={0}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -483,3 +463,4 @@ export const Orb: React.FC<OrbProps> = ({
     </motion.div>
   );
 };
+
