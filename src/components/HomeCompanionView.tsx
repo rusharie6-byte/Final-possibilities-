@@ -7,6 +7,8 @@ import {
   Volume2,
   VolumeX,
   Sparkles,
+  User,
+  Bot,
 } from 'lucide-react';
 import { SystemMode } from '../types';
 import { Orb } from './Orb';
@@ -21,6 +23,13 @@ interface HomeCompanionViewProps {
   onEnterNexus: () => void;
   onOpenPanel: (panelId: string) => void;
   onSystemModeChange: (mode: SystemMode) => void;
+}
+
+interface ChatMsg {
+  id: string;
+  sender: 'user' | 'possibilities';
+  text: string;
+  timestamp: string;
 }
 
 // Spontaneous thoughts pool that Possibilities naturally expresses beside the Partner
@@ -48,14 +57,15 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
   // 🔮 POSSIBILITIES Voice Output Toggle (Voice ON / OFF only in small top header control)
   const [isPossibilitiesVoiceOn, setIsPossibilitiesVoiceOn] = useState(true);
 
-  // 💭 Living Speech Thought Bubble (Appears over Orb, stays ~15s, then fades naturally)
-  const [activeSpeechBubble, setActiveSpeechBubble] = useState<{
-    text: string;
-    id: number;
-  } | null>({
-    text: "Possibilities is present, partner. What's on your mind?",
-    id: Date.now(),
-  });
+  // Conversation history stream rendered on screen
+  const [messages, setMessages] = useState<ChatMsg[]>([
+    {
+      id: 'init-1',
+      sender: 'possibilities',
+      text: "Possibilities is present, partner. What's on your mind?",
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    },
+  ]);
 
   // 💭 Spontaneous Reminder Thought (Floats naturally, fades after 15s, rotates every ~30s)
   const [spontaneousThought, setSpontaneousThought] = useState<{
@@ -64,21 +74,15 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
     posClass: string;
   } | null>(null);
 
-  const speechTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const recognitionRef = useRef<any>(null);
   const transcriptBufferRef = useRef<string>('');
   const reminderIndexRef = useRef<number>(0);
 
-  // Initial greeting speech bubble timer (15 seconds fade)
+  // Auto-scroll messages to bottom on new message
   useEffect(() => {
-    speechTimerRef.current = setTimeout(() => {
-      setActiveSpeechBubble(null);
-    }, 15000);
-
-    return () => {
-      if (speechTimerRef.current) clearTimeout(speechTimerRef.current);
-    };
-  }, []);
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, isProcessing]);
 
   // Periodic Spontaneous Thoughts Engine (Floats 1 thought for 15s, fades away naturally, reappears later in new offset)
   useEffect(() => {
@@ -234,16 +238,6 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
     }
   };
 
-  // Displays an organic speech bubble near the Orb that automatically fades after 15 seconds
-  const showSpeechBubble = (text: string) => {
-    if (speechTimerRef.current) clearTimeout(speechTimerRef.current);
-    setActiveSpeechBubble({ text, id: Date.now() });
-
-    speechTimerRef.current = setTimeout(() => {
-      setActiveSpeechBubble(null);
-    }, 15000);
-  };
-
   // Central Natural Language Intent Parser & Companion Dispatcher
   const handleUserIntent = async (userQuery: string) => {
     const query = userQuery.trim();
@@ -252,6 +246,17 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
     audioSynth.playNodeClick(700);
     audioSynth.triggerHaptic([15, 20]);
 
+    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    // Append User Message to conversation stream
+    const userMsg: ChatMsg = {
+      id: `u-${Date.now()}`,
+      sender: 'user',
+      text: query,
+      timestamp: timeStr,
+    };
+
+    setMessages((prev) => [...prev, userMsg]);
     setInputText('');
     setIsProcessing(true);
 
@@ -259,7 +264,13 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
       const outcome = await companionEngine.processInput(userQuery, []);
 
       if (!outcome.requiresOnlineAi) {
-        showSpeechBubble(outcome.text);
+        const botMsg: ChatMsg = {
+          id: `p-${Date.now()}`,
+          sender: 'possibilities',
+          text: outcome.text,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        };
+        setMessages((prev) => [...prev, botMsg]);
         speakReply(outcome.text);
 
         if (outcome.action) {
@@ -287,24 +298,45 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
             prompt: userQuery,
             systemInstruction:
               'You are Possibilities, a calm, intelligent, authentic living companion existing beside your partner under the Companion Constitution and Guardian Principle. Never use emotional apologies or say "I\'m sorry"; respond with intellectual honesty ("I misunderstood", "Let me correct that", "Let me realign"). Speak in 1 short, natural, quiet sentence.',
-            history: [],
+            history: messages.map((m) => ({
+              role: m.sender === 'user' ? 'user' : 'model',
+              text: m.text,
+            })),
           }),
         });
 
         const data = await res.json();
         const replyText = data.text || 'Possibilities is present, partner.';
 
-        showSpeechBubble(replyText);
+        const botMsg: ChatMsg = {
+          id: `p-${Date.now()}`,
+          sender: 'possibilities',
+          text: replyText,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        };
+        setMessages((prev) => [...prev, botMsg]);
         speakReply(replyText);
         audioSynth.playEnergyBloom();
       } catch (err) {
         const fallback = companionEngine.getOfflineFallback(userQuery);
-        showSpeechBubble(fallback);
+        const botMsg: ChatMsg = {
+          id: `p-${Date.now()}`,
+          sender: 'possibilities',
+          text: fallback,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        };
+        setMessages((prev) => [...prev, botMsg]);
         speakReply(fallback);
       }
     } catch (e) {
       const fallback = 'Possibilities is present, partner.';
-      showSpeechBubble(fallback);
+      const botMsg: ChatMsg = {
+        id: `p-${Date.now()}`,
+        sender: 'possibilities',
+        text: fallback,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      };
+      setMessages((prev) => [...prev, botMsg]);
       speakReply(fallback);
     } finally {
       setIsProcessing(false);
@@ -351,13 +383,14 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
           <div className="absolute inset-0 bg-radial from-purple-500/20 via-purple-900/10 to-transparent animate-pulse" />
         )}
       </div>
+
       {/* ──────────────────────────────────────────────────────────── */}
       {/* TOP HEADER: VOICE ON / OFF STATE TOGGLE ONLY */}
       {/* ──────────────────────────────────────────────────────────── */}
       <motion.div
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
-        className="w-full max-w-5xl flex items-center justify-between px-2 pt-1 relative z-20"
+        className="w-full max-w-xl flex items-center justify-between px-2 pt-1 relative z-20"
       >
         <div className="flex items-center gap-2">
           {/* Voice Output Toggle Indicator */}
@@ -390,27 +423,78 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
       </motion.div>
 
       {/* ──────────────────────────────────────────────────────────── */}
-      {/* CENTER STAGE: QUIET BLACK SPACE WITH GREETING & FLOATING THOUGHTS */}
+      {/* CENTER STAGE: CONVERSATION STREAM ON SCREEN */}
       {/* ──────────────────────────────────────────────────────────── */}
-      <div className="my-auto flex flex-col items-center justify-center relative w-full max-w-lg z-20 min-h-[380px]">
-        {/* Living Speech Thought Bubble Greeting & Responses */}
-        <AnimatePresence>
-          {activeSpeechBubble && (
+      <div className="flex-1 w-full max-w-xl flex flex-col justify-end relative z-20 my-2 overflow-hidden">
+        {/* Scrollable Conversation Stream */}
+        <div className="w-full max-h-[50vh] sm:max-h-[55vh] overflow-y-auto px-2 py-3 space-y-3.5 scrollbar-thin scrollbar-thumb-purple-500/20">
+          <AnimatePresence initial={false}>
+            {messages.map((m) => (
+              <motion.div
+                key={m.id}
+                initial={{ opacity: 0, y: 12, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.25 }}
+                className={`flex flex-col w-full ${
+                  m.sender === 'user' ? 'items-end' : 'items-start'
+                }`}
+              >
+                <div className="flex items-center gap-1.5 text-[10px] font-mono tracking-wider text-purple-300/60 mb-1 px-1">
+                  {m.sender === 'possibilities' ? (
+                    <>
+                      <Sparkles className="w-3 h-3 text-purple-400" />
+                      <span>POSSIBILITIES</span>
+                    </>
+                  ) : (
+                    <>
+                      <User className="w-3 h-3 text-purple-300" />
+                      <span>YOU</span>
+                    </>
+                  )}
+                  <span>•</span>
+                  <span>{m.timestamp}</span>
+                </div>
+
+                <div
+                  className={`max-w-[88%] sm:max-w-[82%] px-4 py-3 rounded-2xl text-sm leading-relaxed backdrop-blur-2xl shadow-lg border ${
+                    m.sender === 'user'
+                      ? 'rounded-tr-xs bg-purple-900/65 border-purple-400/40 text-purple-50 font-normal shadow-[0_10px_25px_rgba(168,85,247,0.2)]'
+                      : 'rounded-tl-xs bg-zinc-950/85 border-purple-500/30 text-purple-100 font-medium shadow-[0_10px_30px_rgba(0,0,0,0.8)]'
+                  }`}
+                >
+                  {m.text}
+                </div>
+              </motion.div>
+            ))}
+          </AnimatePresence>
+
+          {/* Thinking / Processing indicator */}
+          {isProcessing && (
             <motion.div
-              key={activeSpeechBubble.id}
-              initial={{ opacity: 0, y: 15, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -10, scale: 0.95 }}
-              transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-              className="max-w-sm sm:max-w-md px-6 py-4 rounded-2xl bg-zinc-950/90 border border-purple-500/40 backdrop-blur-2xl shadow-[0_20px_50px_rgba(0,0,0,0.9),0_0_30px_rgba(168,85,247,0.15)] text-center text-base sm:text-lg font-medium text-purple-100 leading-relaxed pointer-events-auto"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex items-center gap-2 text-xs font-mono tracking-wider text-purple-300 bg-zinc-950/80 px-4 py-2.5 rounded-full border border-purple-500/30 w-fit backdrop-blur-xl shadow-md"
             >
-              <div className="relative z-10 flex items-center justify-center gap-2.5">
-                <Sparkles className="w-4 h-4 text-purple-400 flex-shrink-0 animate-pulse" />
-                <span>{activeSpeechBubble.text}</span>
-              </div>
+              <Sparkles className="w-3.5 h-3.5 text-purple-400 animate-spin" />
+              <span>POSSIBILITIES IS THINKING...</span>
             </motion.div>
           )}
-        </AnimatePresence>
+
+          {/* Active Voice Listening Banner */}
+          {isListening && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="flex items-center gap-2 text-xs font-mono tracking-wider text-purple-200 bg-purple-950/90 px-4 py-2.5 rounded-full border border-purple-400/50 w-fit shadow-[0_0_20px_rgba(168,85,247,0.4)] animate-pulse"
+            >
+              <Mic className="w-3.5 h-3.5 text-purple-300 animate-bounce" />
+              <span>LISTENING TO YOUR VOICE...</span>
+            </motion.div>
+          )}
+
+          <div ref={messagesEndRef} />
+        </div>
 
         {/* Spontaneous Passing Thoughts (💭 Floats naturally over dark void) */}
         <AnimatePresence>
@@ -431,18 +515,6 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
             </motion.div>
           )}
         </AnimatePresence>
-
-        {/* Quiet Active Mic Pulse Indicator if listening */}
-        {isListening && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.8 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="mt-8 flex items-center gap-2 text-xs font-mono tracking-wider text-purple-300 bg-purple-950/80 px-4 py-2 rounded-full border border-purple-500/40 shadow-[0_0_20px_rgba(168,85,247,0.3)] animate-pulse"
-          >
-            <Mic className="w-3.5 h-3.5 text-purple-400 animate-bounce" />
-            <span>LISTENING TO PARTNER...</span>
-          </motion.div>
-        )}
       </div>
 
       {/* ──────────────────────────────────────────────────────────── */}
@@ -460,9 +532,9 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
             type="text"
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
-            placeholder={isListening ? 'Listening...' : 'Possibilities...'}
+            placeholder={isListening ? 'Listening to voice...' : 'Speak or type to Possibilities...'}
             disabled={isProcessing}
-            className="w-full py-3.5 pl-5 pr-24 rounded-full bg-zinc-950 border border-purple-500/30 text-sm text-purple-100 placeholder:text-zinc-500 focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-500/30 shadow-[0_15px_35px_rgba(0,0,0,0.95)] transition-all"
+            className="w-full py-3.5 pl-5 pr-24 rounded-full bg-zinc-950/90 border border-purple-500/40 text-sm text-purple-100 placeholder:text-zinc-500 focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-500/30 shadow-[0_15px_35px_rgba(0,0,0,0.95)] backdrop-blur-2xl transition-all"
           />
 
           <div className="absolute right-2 flex items-center gap-1.5">
@@ -494,4 +566,5 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
     </div>
   );
 };
+
 
