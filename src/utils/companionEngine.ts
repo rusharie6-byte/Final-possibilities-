@@ -165,9 +165,11 @@ export class CompanionEngine {
     }
 
     // ==================================================
-    // PRIORITY 2: GREETINGS & SMALL TALK
+    // PRIORITY 2: SHORT STANDALONE GREETINGS ONLY
+    // (Longer sentences containing greetings are handled by AI for deep conversational intent)
     // ==================================================
-    if (/^(hi|hello|hey|morning|good morning|evening|good evening|greetings|yo|sup)\b/.test(query)) {
+    const words = query.split(/\s+/);
+    if (words.length <= 3 && /^(hi|hello|hey|morning|good morning|evening|good evening|greetings|yo|sup)[\s!.]*$/i.test(query)) {
       saveSession(this.session);
       if (this.session.interactionCount <= 1) {
         return { text: "Possibilities is present, partner. What's on your mind?" };
@@ -183,57 +185,53 @@ export class CompanionEngine {
     }
 
     // ==================================================
-    // PRIORITY 3: CONTEXT & SESSION MEMORY (Leaving / Returning)
+    // PRIORITY 3: EXPLICIT SESSION STATE (BRB / Returning)
     // ==================================================
     if (
-      query.includes('going to') ||
-      query.includes('brb') ||
-      query.includes('be right back') ||
-      query.includes('stepping away') ||
-      query.includes('feed the dogs') ||
-      query.includes('grab coffee') ||
-      query.includes('lunch') ||
-      query.includes('take a walk')
+      query === 'brb' ||
+      query === 'be right back' ||
+      query === 'stepping away' ||
+      query === 'taking a short break'
     ) {
-      let activity = 'what you were doing';
-      if (query.includes('feed') || query.includes('dog')) activity = 'the dogs';
-      else if (query.includes('coffee')) activity = 'your coffee';
-      else if (query.includes('lunch')) activity = 'lunch';
-      else if (query.includes('walk')) activity = 'your walk';
-
-      this.session.lastUserActivity = activity;
+      this.session.lastUserActivity = 'a short break';
       this.session.userAwayState = true;
       saveSession(this.session);
 
       const reply = this.pickRandom([
-        `Understood. I'll be right here when you return from ${activity}.`,
-        `Take your time. I'll keep things ready for when you get back.`,
-        `Got it. I'll be waiting here.`
+        "Understood. I'll be right here when you return.",
+        "Take your time. I'll keep things ready for when you get back.",
+        "Got it. I'll be waiting here."
       ]);
       return { text: reply };
     }
 
     if (
-      (query.includes('back') || query.includes("i'm back") || query.includes('returned') || query.includes('here again')) &&
+      (query === "i'm back" || query === 'back' || query === 'i am back' || query === 'returned') &&
       this.session.userAwayState
     ) {
-      const lastAct = this.session.lastUserActivity || 'your task';
       this.session.userAwayState = false;
       this.session.lastUserActivity = undefined;
       saveSession(this.session);
 
       const reply = this.pickRandom([
-        `Welcome back. How was ${lastAct}?`,
-        `Glad you're back. Ready to pick up where we left off?`,
-        `Welcome back. What's our next step?`
+        "Welcome back. Ready to pick up where we left off?",
+        "Glad you're back. What's our next step?"
       ]);
       return { text: reply };
     }
 
     // ==================================================
-    // PRIORITY 4: TIME AND DATE
+    // PRIORITY 4: EXPLICIT TIME AND DATE ENQUIRIES
+    // (Must be explicit queries, not incidental sentence occurrences of 'time')
     // ==================================================
-    if (query.includes('time') || query.includes('what time') || query.includes('clock') || query.includes('hour')) {
+    if (
+      query === 'what time is it' ||
+      query === 'what is the time' ||
+      query === 'time' ||
+      query === 'what time' ||
+      query === 'current time' ||
+      query === 'clock'
+    ) {
       const now = new Date();
       const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       const reply = this.pickRandom([
@@ -244,7 +242,13 @@ export class CompanionEngine {
       return { text: reply, action: { type: 'time_display' } };
     }
 
-    if (query.includes('date') || query.includes('day is it') || query.includes("today's date") || query.includes('calendar')) {
+    if (
+      query === 'what date is it' ||
+      query === 'what day is it' ||
+      query === "today's date" ||
+      query === 'what is today\'s date' ||
+      query === 'date'
+    ) {
       const now = new Date();
       const dateStr = now.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
       const reply = `Today is ${dateStr}.`;
@@ -252,21 +256,15 @@ export class CompanionEngine {
     }
 
     // ==================================================
-    // PRIORITY 5: NATURAL LANGUAGE INTENT RECOGNITION
+    // PRIORITY 5: EXPLICIT SYSTEM & NAVIGATION COMMANDS
     // ==================================================
-
-    // CLOSE / DISMISS OVERLAY INTENT
     if (
       query === 'close' ||
-      query.includes('close overlay') ||
-      query.includes('close page') ||
-      query.includes('close view') ||
-      query.includes('close panel') ||
-      query.includes('hide page') ||
-      query.includes('hide overlay') ||
-      query.includes('go back') ||
-      query.includes('back home') ||
-      query.includes('dismiss')
+      query === 'close overlay' ||
+      query === 'close panel' ||
+      query === 'dismiss' ||
+      query === 'go back' ||
+      query === 'back home'
     ) {
       return {
         text: "Closing overlay view.",
@@ -274,26 +272,12 @@ export class CompanionEngine {
       };
     }
 
-    // A. MISSIONS & TASKS INTENT
-    // "What work do I still have?" "What must I still do?" "Today's jobs." "What haven't I finished?" "What's next?" "What is my priority?"
     if (
-      query.includes('mission') ||
-      query.includes('task') ||
-      query.includes('must i still do') ||
-      query.includes('work is left') ||
-      query.includes('work do i still have') ||
-      query.includes("today's jobs") ||
-      query.includes("today's tasks") ||
-      query.includes("today's missions") ||
-      query.includes("haven't i finished") ||
-      query.includes("haven't finished") ||
-      query.includes("what's next") ||
-      query.includes('my priority') ||
-      query.includes('my priorities') ||
-      query.includes('what to do') ||
-      query.includes('todo') ||
-      query.includes('to do list') ||
-      query.includes('agenda')
+      query === 'show missions' ||
+      query === 'open missions' ||
+      query === 'show my tasks' ||
+      query === 'show my to do list' ||
+      query === 'open tasks'
     ) {
       return { 
         text: "Possibilities has loaded your 3 critical daily tasks for today. Check your daily view on screen.",
@@ -301,213 +285,119 @@ export class CompanionEngine {
       };
     }
 
-    // B. MEMORY & SAVING INTENT
-    // "I need to remember something." "I forgot..." "Save this." "Remember this." "Store this." "I'll need this later." "I want to keep this."
     if (
-      query.includes('need to remember') ||
-      query.includes('i forgot') ||
-      query.includes('remember this') ||
-      query.includes('save this') ||
-      query.includes('store this') ||
-      query.includes("need this later") ||
-      query.includes('keep this') ||
-      query.includes('write this down') ||
-      query.includes('note this down') ||
-      query.includes('memory') ||
-      query.includes('memories') ||
-      query.includes('constellation')
+      query === 'open memory' ||
+      query === 'show memory' ||
+      query === 'open my notes' ||
+      query === 'show notes'
     ) {
-      const noteMatch = input.match(/(?:save this|remember this|store this|need to remember|write this down|note down)[:\s]+(.+)/i);
-      if (noteMatch && noteMatch[1]) {
-        const content = noteMatch[1].trim();
+      return {
+        text: "Accessing your cognitive memory constellations.",
+        action: { type: 'navigate', target: 'memory' }
+      };
+    }
+
+    if (
+      query === 'open brain' ||
+      query === 'show brain' ||
+      query === 'neural topology'
+    ) {
+      return {
+        text: "Initiating neural cognitive analysis.",
+        action: { type: 'navigate', target: 'brain' }
+      };
+    }
+
+    if (
+      query === 'show diagnostics' ||
+      query === 'system diagnostics' ||
+      query === 'open command center' ||
+      query === 'show command center'
+    ) {
+      return {
+        text: "Displaying system command center and diagnostics.",
+        action: { type: 'navigate', target: 'commandCenter' }
+      };
+    }
+
+    if (
+      query === 'open settings' ||
+      query === 'show settings' ||
+      query === 'system settings'
+    ) {
+      return {
+        text: "Opening system configuration and preferences.",
+        action: { type: 'navigate', target: 'settings' }
+      };
+    }
+
+    if (
+      query === 'open search' ||
+      query === 'search index'
+    ) {
+      return {
+        text: "Opening search index.",
+        action: { type: 'navigate', target: 'search' }
+      };
+    }
+
+    if (
+      query === 'open orb defense' ||
+      query === 'orb defense'
+    ) {
+      return {
+        text: "Engaging Orb Defense core simulation.",
+        action: { type: 'navigate', target: 'orbDefense' }
+      };
+    }
+
+    // ==================================================
+    // PRIORITY 6: EXPLICIT COMMAND UTILITIES
+    // ==================================================
+    if (query.startsWith('create note:') || query.startsWith('save note:')) {
+      const content = input.replace(/^(create note:|save note:)\s*/i, '').trim();
+      if (content) {
         this.session.notes.push(content);
         saveSession(this.session);
-        const reply = this.pickRandom([
-          `Saved to your memories: "${content}".`,
-          `Recorded. I will keep "${content}" safe for you.`,
-          `Stored in memory.`
-        ]);
-        return { text: reply, action: { type: 'note_created', details: content } };
+        return {
+          text: `Saved to memory: "${content}".`,
+          action: { type: 'note_created', details: content }
+        };
       }
-
-      const reply = this.pickRandom([
-        "Accessing your cognitive memory constellations.",
-        "Opening your saved memories and notes.",
-        "Retrieving your memory nodes."
-      ]);
-      return { text: reply, action: { type: 'navigate', target: 'memory' } };
     }
 
-    // C. BRAIN / THINKING / ANALYSIS INTENT
-    // "Help me think." "I need help thinking." "Analyze this." "What do you think?" "Give me ideas." "Help me solve this."
-    if (
-      query.includes('help me think') ||
-      query.includes('help thinking') ||
-      query.includes('analyze') ||
-      query.includes('what do you think') ||
-      query.includes('give me ideas') ||
-      query.includes('help me solve') ||
-      query.includes('brainstorm') ||
-      query.includes('cognitive') ||
-      query.includes('neural') ||
-      query.includes('brain') ||
-      query.includes('solve this')
-    ) {
-      const reply = this.pickRandom([
-        "Initiating neural cognitive analysis.",
-        "Opening brain topology to help you think through this.",
-        "Let's break this down together."
-      ]);
-      return { text: reply, action: { type: 'navigate', target: 'brain' } };
+    if (query.startsWith('create reminder:') || query.startsWith('set reminder:')) {
+      const remText = input.replace(/^(create reminder:|set reminder:)\s*/i, '').trim();
+      if (remText) {
+        this.session.reminders.push({ id: `${Date.now()}`, text: remText });
+        saveSession(this.session);
+        return {
+          text: `Reminder set: "${remText}".`,
+          action: { type: 'reminder_created', details: remText }
+        };
+      }
     }
 
-    // D. COMMAND CENTER / SYSTEM DIAGNOSTICS INTENT
-    // "System status." "Show diagnostics." "Performance." "Health." "Status."
-    if (
-      query.includes('system status') ||
-      query.includes('show diagnostics') ||
-      query.includes('diagnostics') ||
-      query.includes('performance') ||
-      query.includes('system health') ||
-      query.includes('command center') ||
-      query.includes('telemetry')
-    ) {
-      const reply = this.pickRandom([
-        "Displaying system command center and diagnostics.",
-        "Opening system health and performance telemetry.",
-        "Accessing command center."
-      ]);
-      return { text: reply, action: { type: 'navigate', target: 'commandCenter' } };
-    }
-
-    // E. SETTINGS & PREFERENCES INTENT
-    // "I want to change my voice." "Turn speech off." "Preferences." "I want to change something."
-    if (
-      query.includes('change my voice') ||
-      query.includes('turn speech off') ||
-      query.includes('preferences') ||
-      query.includes('change something') ||
-      query.includes('settings') ||
-      query.includes('options') ||
-      query.includes('configure')
-    ) {
-      const reply = this.pickRandom([
-        "Opening system configuration and preferences.",
-        "Accessing settings for you.",
-        "Bringing up system parameters."
-      ]);
-      return { text: reply, action: { type: 'navigate', target: 'settings' } };
-    }
-
-    // F. SEARCH INTENT
-    // "Find Charlene." "Search..." "Where did I save..." "Look for..."
-    if (
-      query.startsWith('find') ||
-      query.startsWith('search') ||
-      query.includes('where did i save') ||
-      query.includes('look for') ||
-      query.includes('where is my') ||
-      query.includes('locate')
-    ) {
-      const reply = this.pickRandom([
-        "Opening search index. What shall we look for?",
-        "Searching your cognitive notes and memories.",
-        "Accessing search."
-      ]);
-      return { text: reply, action: { type: 'navigate', target: 'search' } };
-    }
-
-    // G. ORB DEFENSE / RELAXATION INTENT
-    // "I'm bored." "I want a break." "Let's defend the core." "I need to relax."
-    if (
-      query.includes('want a break') ||
-      query.includes("i'm bored") ||
-      query.includes('defend the core') ||
-      query.includes('need to relax') ||
-      query.includes('unwind') ||
-      query.includes('orb defense') ||
-      query.includes('take a rest')
-    ) {
-      const reply = this.pickRandom([
-        "Engaging Orb Defense core simulation.",
-        "Opening Orb Defense. Take a moment to relax.",
-        "Accessing core defense protocol."
-      ]);
-      return { text: reply, action: { type: 'navigate', target: 'orbDefense' } };
-    }
-
-    // ==================================================
-    // PRIORITY 6: AMBIGUOUS INTENT HANDLING (Ask Clarification)
-    // ==================================================
-    if (
-      query.includes('lost something') ||
-      query.includes('looking for') ||
-      query.includes('where is it') ||
-      query.includes('can you help me find')
-    ) {
-      const reply = "Would you like me to search your memories, notes, or missions?";
-      return { text: reply };
-    }
-
-    // ==================================================
-    // PRIORITY 7: OTHER ACTIONS & CONFIRMATIONS
-    // ==================================================
-    if (query.includes('remind') || query.includes('reminder')) {
-      const reminderText = input.replace(/^(remind me to|set a reminder to|remind me|reminder)\s*/i, '').trim();
-      this.session.reminders.push({ id: `${Date.now()}`, text: reminderText });
-      saveSession(this.session);
-
-      const reply = this.pickRandom([
-        `Reminder set: "${reminderText}".`,
-        `Logged. I will remind you as requested.`,
-        `Reminder added to your active queue.`
-      ]);
-      return { text: reply, action: { type: 'reminder_created', details: reminderText } };
-    }
-
-    if (query.includes('call') || query.includes('charlene') || query.includes('dial')) {
-      const contactName = query.includes('charlene') ? 'Charlene' : 'contact';
-      const reply = `Shall I initiate a secure voice line with ${contactName}?`;
-
+    if (query === 'call charlene' || query === 'dial charlene') {
       return {
-        text: reply,
+        text: "Shall I initiate a secure voice line with Charlene?",
         action: {
           type: 'confirm',
-          target: `Call ${contactName}`,
-          details: `Voice transmission to ${contactName}`,
+          target: 'Call Charlene',
+          details: 'Voice transmission to Charlene',
         },
       };
     }
 
-    if (query.includes('focus mode') || query.includes('overdrive') || query.includes('calm mode')) {
-      let mode = 'calm';
-      if (query.includes('focus')) mode = 'focus';
-      if (query.includes('overdrive')) mode = 'overdrive';
-
-      const reply = `Switched to ${mode} mode. Systems aligned.`;
-      return { text: reply, action: { type: 'mode_change', target: mode } };
+    if (query === 'switch to focus mode' || query === 'enable focus mode') {
+      return { text: "Switched to focus mode. Systems aligned.", action: { type: 'mode_change', target: 'focus' } };
+    }
+    if (query === 'switch to calm mode' || query === 'enable calm mode') {
+      return { text: "Switched to calm mode. Systems aligned.", action: { type: 'mode_change', target: 'calm' } };
     }
 
-    if (query.includes('how are you') || query.includes('how do you feel') || query.includes('what are you')) {
-      const reply = this.pickRandom([
-        "All systems are operating in harmony. Ready whenever you are.",
-        "Calm and attuned. How are you holding up?",
-        "I'm feeling balanced and ready to assist."
-      ]);
-      return { text: reply };
-    }
-
-    if (query.includes('thank') || query.includes('thanks')) {
-      const reply = this.pickRandom([
-        "Always a pleasure.",
-        "Anytime.",
-        "Glad I could help.",
-        "Of course."
-      ]);
-      return { text: reply };
-    }
-
-    // Default to triggering online AI if connected
+    // Default: Return requiresOnlineAi = true so Gemini AI processes the request
+    // with deep conversational intent, common sense, and emotional context.
     return {
       text: "Thinking...",
       requiresOnlineAi: true,
