@@ -27,15 +27,34 @@ async function startServer() {
       const { prompt, systemInstruction, history } = req.body;
       const ai = new GoogleGenAI({ apiKey });
 
-      let contents = prompt;
+      let contents: any = prompt;
       if (history && Array.isArray(history) && history.length > 0) {
-        contents = [
+        const rawList = [
           ...history.map((h: any) => ({
             role: h.role === 'user' ? 'user' : 'model',
-            parts: [{ text: h.text }]
+            parts: [{ text: String(h.text || '') }]
           })),
-          { role: 'user', parts: [{ text: prompt }] }
+          { role: 'user', parts: [{ text: String(prompt || '') }] }
         ];
+
+        // Sanitize history to ensure strict user/model role alternation for Gemini API
+        const sanitized: any[] = [];
+        for (const item of rawList) {
+          if (!item.parts[0].text.trim()) continue;
+          if (sanitized.length === 0) {
+            sanitized.push(item);
+          } else {
+            const prevRole = sanitized[sanitized.length - 1].role;
+            if (prevRole === item.role) {
+              sanitized[sanitized.length - 1].parts[0].text += `\n${item.parts[0].text}`;
+            } else {
+              sanitized.push(item);
+            }
+          }
+        }
+        if (sanitized.length > 0) {
+          contents = sanitized;
+        }
       }
 
       const response = await ai.models.generateContent({

@@ -39,7 +39,6 @@ const SPONTANEOUS_THOUGHTS = [
   "Call your uncle tonight.",
   "Remember to phone Client #1.",
   "Trailer project can wait until tonight.",
-  "Possibilities is present, partner.",
   "Take a deep breath. I'm right here.",
   "Focus on what brings clarity today.",
 ];
@@ -324,7 +323,7 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
           body: JSON.stringify({
             prompt: userQuery,
             systemInstruction:
-              'You are Possibilities, a calm, intelligent, authentic living companion existing beside your partner under the Companion Constitution and Guardian Principle. Never use emotional apologies or say "I\'m sorry"; respond with intellectual honesty ("I misunderstood", "Let me correct that", "Let me realign"). Speak in 1 short, natural, quiet sentence.',
+              'You are Possibilities, a calm, intelligent, authentic living companion existing beside your partner under the Companion Constitution and Guardian Principle. IMPORTANT: The session initial greeting ("Possibilities is present, partner") was ALREADY delivered at session start. DO NOT repeat "Possibilities is present" or formal arrival greetings under any circumstances. Respond directly, naturally, and conversationally to the user\'s message with genuine intelligence and a calm tone. Never use emotional apologies or say "I\'m sorry"; respond with intellectual honesty ("I misunderstood", "Let me correct that", "Let me realign"). Speak in 1-2 natural, concise sentences.',
             history: messages.map((m) => ({
               role: m.sender === 'user' ? 'user' : 'model',
               text: m.text,
@@ -333,7 +332,7 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
         });
 
         const data = await res.json();
-        const replyText = data.text || 'Possibilities is present, partner.';
+        const replyText = data.text || 'I am listening, partner. How can I assist you with that?';
 
         const botMsg: ChatMsg = {
           id: `p-${Date.now()}`,
@@ -356,7 +355,7 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
         speakReply(fallback);
       }
     } catch (e) {
-      const fallback = 'Possibilities is present, partner.';
+      const fallback = companionEngine.getOfflineFallback(userQuery);
       const botMsg: ChatMsg = {
         id: `p-${Date.now()}`,
         sender: 'possibilities',

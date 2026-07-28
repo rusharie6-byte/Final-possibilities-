@@ -169,7 +169,17 @@ export class CompanionEngine {
     // ==================================================
     if (/^(hi|hello|hey|morning|good morning|evening|good evening|greetings|yo|sup)\b/.test(query)) {
       saveSession(this.session);
-      return { text: "Possibilities is present, partner. What's on your mind?" };
+      if (this.session.interactionCount <= 1) {
+        return { text: "Possibilities is present, partner. What's on your mind?" };
+      }
+      const conversationalGreetings = [
+        "I'm listening, partner.",
+        "Hey there. What are we exploring today?",
+        "Hello! How can I assist you right now?",
+        "Here with you, partner. What's on your mind?",
+        "Greetings, partner. What shall we focus on?"
+      ];
+      return { text: this.pickRandom(conversationalGreetings) };
     }
 
     // ==================================================
