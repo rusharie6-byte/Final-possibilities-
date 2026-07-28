@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { MessageSquareCode, Send, Volume2, VolumeX, Sparkles, Bot, User, RefreshCw } from 'lucide-react';
+import { MessageSquareCode, Send, Volume2, VolumeX, Sparkles, Bot, User, RefreshCw, Mic, MicOff } from 'lucide-react';
 import { ChatMessage } from '../types';
 import { audioSynth } from '../utils/audioSynthesizer';
 
@@ -19,7 +19,78 @@ export const ChatView: React.FC = () => {
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [voiceEnabled, setVoiceEnabled] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [micNotice, setMicNotice] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const recognitionRef = useRef<any>(null);
+
+  const toggleMic = async () => {
+    audioSynth.triggerHaptic([20, 20]);
+    if (isListening) {
+      if (recognitionRef.current) {
+        try { recognitionRef.current.stop(); } catch (e) {}
+      }
+      setIsListening(false);
+      return;
+    }
+
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      setMicNotice('Speech recognition is not natively supported in this browser.');
+      return;
+    }
+
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach((track) => track.stop());
+        setMicNotice(null);
+      } catch (err: any) {
+        console.warn('Microphone permission request failed:', err);
+        setMicNotice('Microphone access blocked. Allow mic access in your browser site permissions.');
+        setIsListening(false);
+        return;
+      }
+    }
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+
+      recognition.onresult = (event: any) => {
+        let transcript = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          transcript += event.results[i][0].transcript;
+        }
+        if (transcript) {
+          setInputText(transcript);
+        }
+      };
+
+      recognition.onerror = (err: any) => {
+        console.warn('Speech recognition error in ChatView:', err);
+        if (err.error === 'not-allowed' || err.error === 'service-not-allowed') {
+          setMicNotice('Microphone access denied. Grant permission in browser address bar.');
+        }
+        setIsListening(false);
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+      setIsListening(true);
+    } catch (e) {
+      console.warn('Failed to start speech recognition in ChatView:', e);
+      setIsListening(false);
+    }
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -201,22 +272,55 @@ export const ChatView: React.FC = () => {
         ))}
       </div>
 
+      {/* Mic Permission Banner Notice */}
+      {micNotice && (
+        <div className="p-2.5 rounded-xl bg-purple-950/90 border border-purple-400/50 flex items-center justify-between text-xs text-purple-200 mb-2">
+          <div className="flex items-center gap-2">
+            <MicOff className="w-4 h-4 text-purple-400 shrink-0 animate-pulse" />
+            <p className="text-[11px] leading-tight">{micNotice}</p>
+          </div>
+          <button
+            onClick={() => setMicNotice(null)}
+            className="px-2 py-0.5 text-[9px] font-bold rounded bg-purple-800 text-white shrink-0 ml-2"
+          >
+            DISMISS
+          </button>
+        </div>
+      )}
+
       {/* Input Bar */}
       <form onSubmit={handleSendMessage} className="relative flex items-center shrink-0 mt-1">
         <input
           type="text"
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
-          placeholder="Speak or type to Possibilities..."
-          className="w-full bg-purple-950/30 border border-purple-500/40 rounded-full px-5 py-3.5 text-xs text-white placeholder-purple-400/50 focus:outline-none focus:border-purple-400 focus:ring-1 focus:ring-purple-400 shadow-inner pr-12 font-mono"
+          placeholder={isListening ? "Listening to your voice..." : "Speak or type to Possibilities..."}
+          className={`w-full bg-purple-950/30 border rounded-full px-5 py-3.5 text-xs text-white placeholder-purple-400/50 focus:outline-none focus:border-purple-400 focus:ring-1 focus:ring-purple-400 shadow-inner pr-24 font-mono transition-all ${
+            isListening ? 'border-purple-400 bg-purple-900/30 ring-1 ring-purple-400/50' : 'border-purple-500/40'
+          }`}
         />
-        <button
-          type="submit"
-          disabled={isSending || !inputText.trim()}
-          className="absolute right-1.5 w-10 h-10 rounded-full bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white flex items-center justify-center transition-all shadow-[0_0_15px_#A855F7]"
-        >
-          <Send className="w-4 h-4" />
-        </button>
+        <div className="absolute right-1.5 flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={toggleMic}
+            className={`w-9 h-9 rounded-full flex items-center justify-center transition-all border ${
+              isListening
+                ? 'bg-purple-600 text-white border-purple-400 shadow-[0_0_15px_#A855F7] animate-pulse'
+                : 'bg-purple-950/80 text-purple-300 border-purple-500/30 hover:border-purple-400'
+            }`}
+            title="Toggle Voice Mic Input"
+          >
+            {isListening ? <Mic className="w-4 h-4 text-white" /> : <MicOff className="w-4 h-4 text-purple-300" />}
+          </button>
+
+          <button
+            type="submit"
+            disabled={isSending || !inputText.trim()}
+            className="w-9 h-9 rounded-full bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white flex items-center justify-center transition-all shadow-[0_0_15px_#A855F7]"
+          >
+            <Send className="w-4 h-4" />
+          </button>
+        </div>
       </form>
     </div>
   );

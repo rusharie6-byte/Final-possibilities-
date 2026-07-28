@@ -54,6 +54,7 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
   const [isMicActive, setIsMicActive] = useState(false);
   const micActiveRef = useRef(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [micPermissionNotice, setMicPermissionNotice] = useState<string | null>(null);
 
   // 🔮 POSSIBILITIES Voice Output Toggle (Voice ON / OFF only in small top header control)
   const [isPossibilitiesVoiceOn, setIsPossibilitiesVoiceOn] = useState(true);
@@ -133,17 +134,33 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
     };
   }, []);
 
-  // Speech Recognition Setup & Handler
-  const startListening = () => {
+  // Speech Recognition Setup & Handler with Explicit Microphone Permission Request
+  const startListening = async () => {
     if (typeof window === 'undefined') return;
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
-      alert('Speech recognition is not supported in this browser. Please use text input.');
+      setMicPermissionNotice('Speech recognition is not natively supported in this browser. Please type your text below.');
       setIsMicActive(false);
       micActiveRef.current = false;
       return;
+    }
+
+    // Step 1: Explicitly request media permissions via getUserMedia to trigger browser mic permission prompt
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach((track) => track.stop()); // Immediately stop tracks so SpeechRecognition can acquire mic cleanly
+        setMicPermissionNotice(null);
+      } catch (err: any) {
+        console.warn('Microphone permission request failed:', err);
+        setMicPermissionNotice('Microphone access blocked. Click the browser address bar icon or open in a new tab to grant microphone permission.');
+        setIsMicActive(false);
+        micActiveRef.current = false;
+        setIsListening(false);
+        return;
+      }
     }
 
     // Stop any existing instance
@@ -158,7 +175,7 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
 
     try {
       const recognition = new SpeechRecognition();
-      recognition.continuous = true;
+      recognition.continuous = false; // False is much more reliable across browsers
       recognition.interimResults = true;
       recognition.lang = 'en-US';
 
@@ -178,7 +195,7 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
 
         transcriptBufferRef.current = transcript;
 
-        // Throttle UI text updates to max once every 150ms to prevent React re-render lag
+        // Throttle UI text updates
         const now = Date.now();
         if (isFinal || now - lastUpdate > 150) {
           lastUpdate = now;
@@ -189,6 +206,7 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
       recognition.onerror = (err: any) => {
         console.warn('Speech recognition error:', err);
         if (err.error === 'not-allowed' || err.error === 'service-not-allowed' || err.error === 'audio-capture') {
+          setMicPermissionNotice('Microphone permission not permitted in this view. Please allow mic access in your browser site settings.');
           setIsMicActive(false);
           micActiveRef.current = false;
           setIsListening(false);
@@ -204,13 +222,13 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
           handleUserIntent(textToSubmit);
         }
 
-        // Keep mic listening persistently if still active in state
+        // Re-listen if user still has MIC active
         if (micActiveRef.current) {
           setTimeout(() => {
             if (micActiveRef.current) {
               startListening();
             }
-          }, 300);
+          }, 400);
         }
       };
 
@@ -466,6 +484,26 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
           )}
         </button>
       </motion.div>
+
+      {/* Microphone Permission Notice Banner */}
+      {micPermissionNotice && (
+        <motion.div
+          initial={{ opacity: 0, y: -5 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="w-full max-w-xl mx-auto my-1.5 p-3 rounded-xl bg-purple-950/90 border border-purple-400/50 backdrop-blur-md shadow-lg flex items-center justify-between text-xs text-purple-200 z-30"
+        >
+          <div className="flex items-center gap-2 pr-2">
+            <MicOff className="w-4 h-4 text-purple-400 shrink-0 animate-pulse" />
+            <p className="leading-snug">{micPermissionNotice}</p>
+          </div>
+          <button
+            onClick={() => setMicPermissionNotice(null)}
+            className="px-2.5 py-1 text-[10px] font-bold rounded-md bg-purple-800 hover:bg-purple-700 text-white shrink-0 transition-all"
+          >
+            DISMISS
+          </button>
+        </motion.div>
+      )}
 
       {/* ──────────────────────────────────────────────────────────── */}
       {/* CENTER STAGE: CONVERSATION STREAM ON SCREEN */}

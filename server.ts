@@ -67,7 +67,7 @@ async function startServer() {
       }
 
       // Model fallback cascade for maximum reliability online
-      const modelsToTry = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+      const modelsToTry = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"];
       let lastError: any = null;
       let textResult: string | null = null;
 
@@ -84,7 +84,7 @@ async function startServer() {
           }
         } catch (err: any) {
           lastError = err;
-          console.warn(`Model ${modelName} failed, trying next fallback...`, err?.message || err);
+          console.warn(`Model ${modelName} attempt failed:`, err?.message || err);
         }
       }
 
@@ -92,16 +92,52 @@ async function startServer() {
         return res.json({ text: textResult });
       }
 
-      throw lastError || new Error("All Gemini model attempts failed.");
+      console.error("All Gemini model attempts failed:", lastError);
+      return res.json({
+        text: "Cloud AI connection issue: " + (lastError?.message || "Service unavailable") + ". Local cognitive engine active.",
+        fallback: true,
+        error: lastError?.message || "Model failure"
+      });
     } catch (error: any) {
       console.error("Gemini API Error:", error);
-      res.status(500).json({ error: error?.message || "Failed to contact Gemini neural network." });
+      return res.json({
+        text: "Cloud AI connection issue: " + (error?.message || "Service error") + ". Local cognitive engine active.",
+        fallback: true,
+        error: error?.message || "Internal error"
+      });
     }
   });
 
-  // Health check
-  app.get("/api/health", (req, res) => {
-    res.json({ status: "alive", system: "Possibilities Shell vFINAL-C1" });
+  // Temporary diagnostics health check
+  app.get("/api/health", async (req, res) => {
+    const apiKey = process.env.GEMINI_API_KEY;
+    const geminiKeyPresent = Boolean(
+      apiKey && apiKey !== "MY_GEMINI_API_KEY" && apiKey.trim() !== ""
+    );
+
+    let geminiConnection: "success" | "fail" = "fail";
+
+    if (geminiKeyPresent) {
+      try {
+        const ai = new GoogleGenAI({ apiKey: apiKey! });
+        const testResponse = await ai.models.generateContent({
+          model: "gemini-2.0-flash",
+          contents: "ping",
+        });
+        if (testResponse && testResponse.text) {
+          geminiConnection = "success";
+        }
+      } catch (err) {
+        console.warn("Diagnostics test call to Gemini failed:", err);
+        geminiConnection = "fail";
+      }
+    }
+
+    res.json({
+      geminiKeyPresent,
+      geminiConnection,
+      backendOnline: true,
+    });
   });
 
   // Vite middleware for development vs static serve for production
