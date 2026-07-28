@@ -8,18 +8,27 @@ dotenv.config();
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
-  app.use(express.json());
+  // CORS and JSON middleware
+  app.use((req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+    if (req.method === 'OPTIONS') {
+      return res.sendStatus(200);
+    }
+    next();
+  });
+  app.use(express.json({ limit: '10mb' }));
 
   // Server-side Gemini API endpoint
   app.post("/api/gemini", async (req, res) => {
     try {
       const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey || apiKey === "MY_GEMINI_API_KEY") {
+      if (!apiKey || apiKey === "MY_GEMINI_API_KEY" || apiKey.trim() === "") {
         // Graceful fallback response if API key is not configured yet
         return res.json({
-          text: "I am Possibilities, your intelligent living companion. (To enable full neural generative capacity, ensure GEMINI_API_KEY is set in your environment variables). How can I assist your objectives today?",
+          text: "I am Possibilities, your intelligent living companion. (To enable full generative capacity, ensure GEMINI_API_KEY is set in your host environment variables). How can I assist your objectives today?",
           fallback: true
         });
       }
@@ -57,13 +66,33 @@ async function startServer() {
         }
       }
 
-      const response = await ai.models.generateContent({
-        model: "gemini-2.0-flash",
-        contents: contents,
-        config: systemInstruction ? { systemInstruction } : undefined,
-      });
+      // Model fallback cascade for maximum reliability online
+      const modelsToTry = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+      let lastError: any = null;
+      let textResult: string | null = null;
 
-      res.json({ text: response.text });
+      for (const modelName of modelsToTry) {
+        try {
+          const response = await ai.models.generateContent({
+            model: modelName,
+            contents: contents,
+            config: systemInstruction ? { systemInstruction } : undefined,
+          });
+          if (response && response.text) {
+            textResult = response.text;
+            break;
+          }
+        } catch (err: any) {
+          lastError = err;
+          console.warn(`Model ${modelName} failed, trying next fallback...`, err?.message || err);
+        }
+      }
+
+      if (textResult) {
+        return res.json({ text: textResult });
+      }
+
+      throw lastError || new Error("All Gemini model attempts failed.");
     } catch (error: any) {
       console.error("Gemini API Error:", error);
       res.status(500).json({ error: error?.message || "Failed to contact Gemini neural network." });
