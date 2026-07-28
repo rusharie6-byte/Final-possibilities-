@@ -1,7 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { perfManager } from '../utils/performance';
 
-export const AmbientParticlesCanvas: React.FC = () => {
+interface AmbientParticlesCanvasProps {
+  systemMode?: string;
+  isEnergized?: boolean;
+}
+
+export const AmbientParticlesCanvas: React.FC<AmbientParticlesCanvasProps> = ({
+  systemMode,
+  isEnergized = false,
+}) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const pointerPos = useRef({ x: 0, y: 0, targetX: 0, targetY: 0 });
   const [effectiveMode, setEffectiveMode] = useState<'high' | 'low'>(perfManager.getEffectiveMode());
@@ -16,7 +24,7 @@ export const AmbientParticlesCanvas: React.FC = () => {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { alpha: true });
     if (!ctx) return;
 
     let animId: number | null = null;
@@ -31,13 +39,13 @@ export const AmbientParticlesCanvas: React.FC = () => {
 
     window.addEventListener('resize', handleResize);
 
-    const particleCount = effectiveMode === 'low' ? 16 : 42;
+    const particleCount = effectiveMode === 'low' ? 14 : 32;
     const particles = Array.from({ length: particleCount }).map(() => ({
       x: Math.random() * width,
       y: Math.random() * height,
       size: Math.random() * 2 + 0.5,
-      vx: (Math.random() - 0.5) * 0.25,
-      vy: (Math.random() - 0.5) * 0.25,
+      vx: (Math.random() - 0.5) * (isEnergized ? 0.45 : 0.2),
+      vy: (Math.random() - 0.5) * (isEnergized ? 0.45 : 0.2),
       depth: Math.random() * 0.8 + 0.2,
       alpha: Math.random() * 0.5 + 0.2,
       color: Math.random() > 0.5 ? '#A855F7' : '#C084FC',
@@ -63,9 +71,9 @@ export const AmbientParticlesCanvas: React.FC = () => {
 
       const px = pointerPos.current.x;
       const py = pointerPos.current.y;
-      const isHigh = effectiveMode === 'high';
 
-      particles.forEach((p) => {
+      for (let i = 0; i < particles.length; i++) {
+        const p = particles[i];
         p.x += p.vx;
         p.y += p.vy;
 
@@ -77,19 +85,15 @@ export const AmbientParticlesCanvas: React.FC = () => {
         const drawX = p.x + px * p.depth;
         const drawY = p.y + py * p.depth;
 
+        // Core particle point
         ctx.beginPath();
         ctx.arc(drawX, drawY, p.size * p.depth, 0, Math.PI * 2);
         ctx.fillStyle = p.color;
         ctx.globalAlpha = p.alpha;
-        if (isHigh) {
-          ctx.shadowColor = p.color;
-          ctx.shadowBlur = 6 * p.depth;
-        }
         ctx.fill();
-        ctx.globalAlpha = 1.0;
-        if (isHigh) ctx.shadowBlur = 0;
-      });
+      }
 
+      ctx.globalAlpha = 1.0;
       animId = requestAnimationFrame(render);
     };
 
@@ -100,7 +104,7 @@ export const AmbientParticlesCanvas: React.FC = () => {
       window.removeEventListener('resize', handleResize);
       window.removeEventListener('mousemove', handleMouseMove);
     };
-  }, [effectiveMode]);
+  }, [effectiveMode, isEnergized]);
 
   return (
     <canvas

@@ -21,6 +21,10 @@ interface OrbProps {
   className?: string;
 }
 
+// Pre-cached static Image instance to avoid re-creation on re-renders
+const cachedOrbImg = new Image();
+cachedOrbImg.src = orbImageUrl;
+
 export const Orb: React.FC<OrbProps> = ({
   mode = 'hero',
   state = 'idle',
@@ -110,8 +114,7 @@ export const Orb: React.FC<OrbProps> = ({
     let time = 0;
     let processSweepAngle = 0;
 
-    const img = new Image();
-    img.src = orbImageUrl;
+    const img = cachedOrbImg;
 
     const isHigh = effectiveMode === 'high';
     const particleCount = isHigh ? 50 : 25;

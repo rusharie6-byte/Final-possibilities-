@@ -74,12 +74,22 @@ class AudioSynthesizer {
    * Optional Speech Synthesis for text-to-speech output
    */
   public speak(text: string) {
-    if (this.isMuted || typeof window === 'undefined' || !('speechSynthesis' in window)) return;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.pitch = 0.95;
-    utterance.rate = 1.05;
-    window.speechSynthesis.speak(utterance);
+    if (this.isMuted || typeof window === 'undefined' || !('speechSynthesis' in window) || !text) return;
+    try {
+      window.speechSynthesis.cancel();
+      setTimeout(() => {
+        try {
+          const utterance = new SpeechSynthesisUtterance(text);
+          utterance.pitch = 0.95;
+          utterance.rate = 1.05;
+          window.speechSynthesis.speak(utterance);
+        } catch (err) {
+          console.warn('TTS speak error:', err);
+        }
+      }, 50);
+    } catch (e) {
+      console.warn('TTS cancel error:', e);
+    }
   }
 }
 

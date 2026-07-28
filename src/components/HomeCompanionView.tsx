@@ -52,6 +52,8 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
 }) => {
   const [inputText, setInputText] = useState('');
   const [isListening, setIsListening] = useState(false);
+  const [isMicActive, setIsMicActive] = useState(false);
+  const micActiveRef = useRef(false);
   const [isProcessing, setIsProcessing] = useState(false);
 
   // 🔮 POSSIBILITIES Voice Output Toggle (Voice ON / OFF only in small top header control)
@@ -86,6 +88,8 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
 
   // Periodic Spontaneous Thoughts Engine (Floats 1 thought for 15s, fades away naturally, reappears later in new offset)
   useEffect(() => {
+    let fadeTimer: ReturnType<typeof setTimeout> | null = null;
+
     const triggerThought = () => {
       const text = SPONTANEOUS_THOUGHTS[reminderIndexRef.current % SPONTANEOUS_THOUGHTS.length];
       reminderIndexRef.current += 1;
@@ -107,7 +111,8 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
       });
 
       // Slowly fade out after 15 seconds
-      setTimeout(() => {
+      if (fadeTimer) clearTimeout(fadeTimer);
+      fadeTimer = setTimeout(() => {
         setSpontaneousThought((curr) => (curr && curr.text === text ? null : curr));
       }, 15000);
     };
@@ -125,6 +130,7 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
     return () => {
       clearTimeout(initialDelay);
       clearInterval(interval);
+      if (fadeTimer) clearTimeout(fadeTimer);
     };
   }, []);
 
@@ -136,6 +142,8 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
 
     if (!SpeechRecognition) {
       alert('Speech recognition is not supported in this browser. Please use text input.');
+      setIsMicActive(false);
+      micActiveRef.current = false;
       return;
     }
 
@@ -151,7 +159,7 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
 
     try {
       const recognition = new SpeechRecognition();
-      recognition.continuous = false;
+      recognition.continuous = true;
       recognition.interimResults = true;
       recognition.lang = 'en-US';
 
@@ -181,7 +189,11 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
 
       recognition.onerror = (err: any) => {
         console.warn('Speech recognition error:', err);
-        setIsListening(false);
+        if (err.error === 'not-allowed' || err.error === 'service-not-allowed' || err.error === 'audio-capture') {
+          setIsMicActive(false);
+          micActiveRef.current = false;
+          setIsListening(false);
+        }
       };
 
       recognition.onend = () => {
@@ -192,19 +204,31 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
           transcriptBufferRef.current = '';
           handleUserIntent(textToSubmit);
         }
+
+        // Keep mic listening persistently if still active in state
+        if (micActiveRef.current) {
+          setTimeout(() => {
+            if (micActiveRef.current) {
+              startListening();
+            }
+          }, 300);
+        }
       };
 
       recognitionRef.current = recognition;
       recognition.start();
       setIsListening(true);
-      audioSynth.triggerHaptic([30, 30]);
     } catch (err) {
       console.warn('Speech recognition start failed:', err);
+      micActiveRef.current = false;
+      setIsMicActive(false);
       setIsListening(false);
     }
   };
 
   const stopListening = () => {
+    micActiveRef.current = false;
+    setIsMicActive(false);
     if (recognitionRef.current) {
       try {
         recognitionRef.current.stop();
@@ -216,9 +240,12 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
   };
 
   const toggleHumanMic = () => {
-    if (isListening) {
+    audioSynth.triggerHaptic([30, 30]);
+    if (isMicActive) {
       stopListening();
     } else {
+      micActiveRef.current = true;
+      setIsMicActive(true);
       startListening();
     }
   };
@@ -385,7 +412,7 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
       </div>
 
       {/* ──────────────────────────────────────────────────────────── */}
-      {/* TOP HEADER: VOICE ON / OFF STATE TOGGLE ONLY */}
+      {/* TOP HEADER: SPEAKER & MIC VOICE TOGGLES */}
       {/* ──────────────────────────────────────────────────────────── */}
       <motion.div
         initial={{ opacity: 0, y: -10 }}
@@ -393,7 +420,7 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
         className="w-full max-w-xl flex items-center justify-between px-2 pt-1 relative z-20"
       >
         <div className="flex items-center gap-2">
-          {/* Voice Output Toggle Indicator */}
+          {/* Voice Output (TTS) Toggle */}
           <button
             onClick={toggleVoiceOutput}
             className={`px-3 py-1.5 rounded-full border text-[11px] font-semibold tracking-wide transition-all flex items-center gap-2 backdrop-blur-xl ${
@@ -401,7 +428,7 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
                 ? 'bg-purple-950/80 text-purple-200 border-purple-400/50 shadow-[0_0_20px_rgba(168,85,247,0.35)]'
                 : 'bg-zinc-900/80 text-zinc-400 border-zinc-800 hover:text-zinc-200'
             }`}
-            title="Voice State (ON / OFF)"
+            title="Speech Output (ON / OFF)"
           >
             <div className="relative flex items-center justify-center">
               <span
@@ -412,14 +439,33 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
                 }`}
               />
             </div>
-            <span>{isPossibilitiesVoiceOn ? 'VOICE ON' : 'VOICE OFF'}</span>
+            <span>{isPossibilitiesVoiceOn ? 'SPEAKER ON' : 'SPEAKER OFF'}</span>
           </button>
         </div>
 
-        {/* Minimal Presence Designation */}
-        <div className="flex items-center gap-1.5 text-[10px] font-mono tracking-widest text-zinc-400 uppercase">
-          <span>POSSIBILITIES</span>
-        </div>
+        {/* Right Top: Voice Input Mic Toggle */}
+        <button
+          type="button"
+          onClick={toggleHumanMic}
+          className={`px-3 py-1.5 rounded-full border text-[11px] font-semibold tracking-wide transition-all flex items-center gap-2 backdrop-blur-xl ${
+            isMicActive
+              ? 'bg-purple-600 text-white border-purple-400 shadow-[0_0_20px_rgba(168,85,247,0.6)] animate-pulse'
+              : 'bg-zinc-900/90 text-purple-300 border-purple-500/30 hover:border-purple-400 hover:text-purple-200'
+          }`}
+          title="Toggle Voice Input (ON / OFF)"
+        >
+          {isMicActive ? (
+            <>
+              <Mic className="w-3.5 h-3.5 text-white" />
+              <span>MIC ON</span>
+            </>
+          ) : (
+            <>
+              <MicOff className="w-3.5 h-3.5 text-purple-300" />
+              <span>MIC OFF</span>
+            </>
+          )}
+        </button>
       </motion.div>
 
       {/* ──────────────────────────────────────────────────────────── */}
@@ -518,7 +564,7 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
       </div>
 
       {/* ──────────────────────────────────────────────────────────── */}
-      {/* BOTTOM DOCKED CHAT & VOICE BAR */}
+      {/* BOTTOM DOCKED CHAT BAR */}
       {/* ──────────────────────────────────────────────────────────── */}
       <div className="w-full max-w-xl flex flex-col gap-3 relative z-30 mb-2">
         <form
@@ -532,26 +578,12 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
             type="text"
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
-            placeholder={isListening ? 'Listening to voice...' : 'Speak or type to Possibilities...'}
+            placeholder={isListening ? 'Listening to voice...' : 'Type a message to Possibilities...'}
             disabled={isProcessing}
-            className="w-full py-3.5 pl-5 pr-24 rounded-full bg-zinc-950/90 border border-purple-500/40 text-sm text-purple-100 placeholder:text-zinc-500 focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-500/30 shadow-[0_15px_35px_rgba(0,0,0,0.95)] backdrop-blur-2xl transition-all"
+            className="w-full py-3.5 pl-5 pr-14 rounded-full bg-zinc-950/90 border border-purple-500/40 text-sm text-purple-100 placeholder:text-zinc-500 focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-500/30 shadow-[0_15px_35px_rgba(0,0,0,0.95)] backdrop-blur-2xl transition-all"
           />
 
-          <div className="absolute right-2 flex items-center gap-1.5">
-            {/* Voice Input Mic Button */}
-            <button
-              type="button"
-              onClick={toggleHumanMic}
-              className={`p-2 rounded-full transition-all ${
-                isListening
-                  ? 'bg-purple-600 text-white animate-pulse shadow-[0_0_15px_#A855F7]'
-                  : 'bg-zinc-900 hover:bg-zinc-800 text-purple-300 border border-purple-500/30'
-              }`}
-              title="Speak to Possibilities"
-            >
-              {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-            </button>
-
+          <div className="absolute right-2 flex items-center">
             {/* Submit Button */}
             <button
               type="submit"

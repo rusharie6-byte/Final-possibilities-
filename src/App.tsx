@@ -56,9 +56,6 @@ export default function App() {
     <div className="min-h-screen min-h-[100dvh] w-full bg-[#030008] text-purple-100 flex flex-col font-sans selection:bg-purple-600 selection:text-white overflow-x-hidden relative">
       {/* Living Atmospheric Depth Background */}
       <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
-        {/* Mouse Parallax Plasma Particles */}
-        <AmbientParticlesCanvas />
-
         {/* Soft Radial Energy Nebulae */}
         <div className="absolute -top-[20%] left-1/2 -translate-x-1/2 w-[1000px] h-[600px] bg-gradient-to-b from-purple-900/25 via-indigo-900/10 to-transparent blur-[120px] rounded-full animate-pulse-glow" />
         <div className="absolute top-1/2 left-1/4 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[700px] bg-radial from-fuchsia-900/15 via-purple-950/5 to-transparent blur-[100px] rounded-full" />
