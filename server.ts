@@ -66,38 +66,18 @@ async function startServer() {
         }
       }
 
-      // Model fallback cascade for maximum reliability online
-      const modelsToTry = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"];
-      let lastError: any = null;
-      let textResult: string | null = null;
-
-      for (const modelName of modelsToTry) {
-        try {
-          const response = await ai.models.generateContent({
-            model: modelName,
-            contents: contents,
-            config: systemInstruction ? { systemInstruction } : undefined,
-          });
-          if (response && response.text) {
-            textResult = response.text;
-            break;
-          }
-        } catch (err: any) {
-          lastError = err;
-          console.warn(`Model ${modelName} attempt failed:`, err?.message || err);
-        }
-      }
-
-      if (textResult) {
-        return res.json({ text: textResult });
-      }
-
-      console.error("All Gemini model attempts failed:", lastError);
-      return res.json({
-        text: "Cloud AI connection issue: " + (lastError?.message || "Service unavailable") + ". Local cognitive engine active.",
-        fallback: true,
-        error: lastError?.message || "Model failure"
+      // Direct call to primary supported model gemini-2.0-flash
+      const response = await ai.models.generateContent({
+        model: "gemini-2.0-flash",
+        contents: contents,
+        config: systemInstruction ? { systemInstruction } : undefined,
       });
+
+      if (response && response.text) {
+        return res.json({ text: response.text });
+      }
+
+      throw new Error("No text response received from Gemini model.");
     } catch (error: any) {
       console.error("Gemini API Error:", error);
       return res.json({

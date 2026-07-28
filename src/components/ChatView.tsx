@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { MessageSquareCode, Send, Volume2, VolumeX, Sparkles, Bot, User, RefreshCw, Mic, MicOff } from 'lucide-react';
+import { MessageSquareCode, Send, Volume2, VolumeX, Sparkles, Bot, User, RefreshCw, Mic, MicOff, Copy, Check } from 'lucide-react';
 import { ChatMessage } from '../types';
 import { audioSynth } from '../utils/audioSynthesizer';
 
@@ -21,7 +21,17 @@ export const ChatView: React.FC = () => {
   const [voiceEnabled, setVoiceEnabled] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [micNotice, setMicNotice] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+
+  const handleCopy = (id: string, text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(id);
+    audioSynth.triggerHaptic([15]);
+    setTimeout(() => {
+      setCopiedId((curr) => (curr === id ? null : curr));
+    }, 2000);
+  };
   const recognitionRef = useRef<any>(null);
 
   const toggleMic = async () => {
@@ -232,8 +242,25 @@ export const ChatView: React.FC = () => {
                   </div>
                 )}
                 <p className="whitespace-pre-wrap">{msg.text}</p>
-                <div className={`text-[9px] mt-2 font-sans ${isUser ? 'text-indigo-400/60 text-right' : 'text-purple-400/60'}`}>
-                  {msg.timestamp}
+                <div className={`text-[9px] mt-2 font-sans flex items-center justify-between gap-2 border-t pt-1.5 ${isUser ? 'text-indigo-400/60 border-indigo-500/20' : 'text-purple-400/60 border-purple-500/20'}`}>
+                  <span>{msg.timestamp}</span>
+                  <button
+                    onClick={() => handleCopy(msg.id, msg.text)}
+                    className="flex items-center gap-1 text-[10px] font-mono hover:text-white transition-all px-1.5 py-0.5 rounded bg-black/40 hover:bg-black/80"
+                    title="Copy message text"
+                  >
+                    {copiedId === msg.id ? (
+                      <>
+                        <Check className="w-3 h-3 text-emerald-400" />
+                        <span className="text-emerald-300">Copied</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3 h-3" />
+                        <span>Copy</span>
+                      </>
+                    )}
+                  </button>
                 </div>
               </div>
             </motion.div>

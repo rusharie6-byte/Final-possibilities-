@@ -9,6 +9,8 @@ import {
   Sparkles,
   User,
   Bot,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { SystemMode } from '../types';
 import { Orb } from './Orb';
@@ -55,6 +57,16 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
   const micActiveRef = useRef(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [micPermissionNotice, setMicPermissionNotice] = useState<string | null>(null);
+  const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
+
+  const handleCopyMsg = (id: string, text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedMsgId(id);
+    audioSynth.triggerHaptic([15]);
+    setTimeout(() => {
+      setCopiedMsgId((curr) => (curr === id ? null : curr));
+    }, 2000);
+  };
 
   // 🔮 POSSIBILITIES Voice Output Toggle (Voice ON / OFF only in small top header control)
   const [isPossibilitiesVoiceOn, setIsPossibilitiesVoiceOn] = useState(true);
@@ -546,7 +558,26 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
                       : 'rounded-tl-xs bg-zinc-950/85 border-purple-500/30 text-purple-100 font-medium shadow-[0_10px_30px_rgba(0,0,0,0.8)]'
                   }`}
                 >
-                  {m.text}
+                  <p>{m.text}</p>
+                  <div className="mt-2 pt-1.5 border-t border-purple-500/20 flex items-center justify-end">
+                    <button
+                      onClick={() => handleCopyMsg(m.id, m.text)}
+                      className="flex items-center gap-1 text-[10px] font-mono text-purple-300/70 hover:text-white transition-all px-2 py-0.5 rounded bg-black/40 hover:bg-purple-900/40 border border-purple-500/20"
+                      title="Copy message text"
+                    >
+                      {copiedMsgId === m.id ? (
+                        <>
+                          <Check className="w-3 h-3 text-emerald-400" />
+                          <span className="text-emerald-300">Copied</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3 h-3" />
+                          <span>Copy</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
               </motion.div>
             ))}
