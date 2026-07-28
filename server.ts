@@ -34,7 +34,14 @@ async function startServer() {
       }
 
       const { prompt, systemInstruction, history } = req.body;
-      const ai = new GoogleGenAI({ apiKey });
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          },
+        },
+      });
 
       let contents: any = prompt;
       if (history && Array.isArray(history) && history.length > 0) {
@@ -66,9 +73,9 @@ async function startServer() {
         }
       }
 
-      // Direct call to primary supported model gemini-2.0-flash
+      // Direct call to primary supported model gemini-3.6-flash
       const response = await ai.models.generateContent({
-        model: "gemini-2.0-flash",
+        model: "gemini-3.6-flash",
         contents: contents,
         config: systemInstruction ? { systemInstruction } : undefined,
       });
@@ -99,9 +106,16 @@ async function startServer() {
 
     if (geminiKeyPresent) {
       try {
-        const ai = new GoogleGenAI({ apiKey: apiKey! });
+        const ai = new GoogleGenAI({
+          apiKey: apiKey!,
+          httpOptions: {
+            headers: {
+              'User-Agent': 'aistudio-build',
+            },
+          },
+        });
         const testResponse = await ai.models.generateContent({
-          model: "gemini-2.0-flash",
+          model: "gemini-3.6-flash",
           contents: "ping",
         });
         if (testResponse && testResponse.text) {
