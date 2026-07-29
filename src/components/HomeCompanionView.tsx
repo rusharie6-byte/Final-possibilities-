@@ -1,19 +1,15 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Mic,
   MicOff,
   Send,
-  Volume2,
-  VolumeX,
   Sparkles,
   User,
-  Bot,
   Copy,
   Check,
 } from 'lucide-react';
 import { SystemMode } from '../types';
-import { Orb } from './Orb';
 import { AmbientParticlesCanvas } from './AmbientParticlesCanvas';
 import { audioSynth } from '../utils/audioSynthesizer';
 import { companionEngine } from '../utils/companionEngine';
@@ -45,30 +41,25 @@ const SPONTANEOUS_THOUGHTS = [
   "Focus on what brings clarity today.",
 ];
 
+// Browser helper for SpeechRecognition compatibility
+const getSpeechRecognitionClass = (): any => {
+  if (typeof window === 'undefined') return null;
+  return (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition || null;
+};
+
 export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
   systemMode,
-  onEnterNexus,
   onOpenPanel,
   onSystemModeChange,
 }) => {
   const [inputText, setInputText] = useState('');
   const [isListening, setIsListening] = useState(false);
   const [isMicActive, setIsMicActive] = useState(false);
-  const micActiveRef = useRef(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [micPermissionNotice, setMicPermissionNotice] = useState<string | null>(null);
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
 
-  const handleCopyMsg = (id: string, text: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedMsgId(id);
-    audioSynth.triggerHaptic([15]);
-    setTimeout(() => {
-      setCopiedMsgId((curr) => (curr === id ? null : curr));
-    }, 2000);
-  };
-
-  // 🔮 POSSIBILITIES Voice Output Toggle (Voice ON / OFF only in small top header control)
+  // 🔮 POSSIBILITIES Voice Output Toggle (Speaker ON / OFF)
   const [isPossibilitiesVoiceOn, setIsPossibilitiesVoiceOn] = useState(true);
 
   // Conversation history stream rendered on screen
@@ -81,7 +72,7 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
     },
   ]);
 
-  // 💭 Spontaneous Reminder Thought (Floats naturally, fades after 15s, rotates every ~30s)
+  // 💭 Spontaneous Reminder Thought (Floats naturally, fades after 15s, rotates every ~32s)
   const [spontaneousThought, setSpontaneousThought] = useState<{
     text: string;
     id: number;
@@ -89,16 +80,48 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
   } | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
-  const recognitionRef = useRef<any>(null);
   const transcriptBufferRef = useRef<string>('');
   const reminderIndexRef = useRef<number>(0);
 
-  // Auto-scroll messages to bottom on new message
+  // Speech Recognition Persistence & Safety Refs
+  const recognitionRef = useRef<any>(null);
+  const isRecognitionRunningRef = useRef<boolean>(false);
+  const micActiveRef = useRef<boolean>(false);
+  const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Synchronize micActiveRef with state
+  useEffect(() => {
+    micActiveRef.current = isMicActive;
+  }, [isMicActive]);
+
+  // Copy Message Handler
+  const handleCopyMsg = useCallback((id: string, text: string) => {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).catch(() => {});
+    }
+    setCopiedMsgId(id);
+    audioSynth.triggerHaptic([15]);
+    setTimeout(() => {
+      setCopiedMsgId((curr) => (curr === id ? null : curr));
+    }, 2000);
+  }, []);
+
+  // Voice output speech helper
+  const speakReply = useCallback(
+    (text: string) => {
+      if (isPossibilitiesVoiceOn) {
+        audioSynth.speak(text);
+      }
+    },
+    [isPossibilitiesVoiceOn]
+  );
+
+  // Auto-scroll messages to bottom on new message or processing state
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isProcessing]);
 
-  // Periodic Spontaneous Thoughts Engine (Floats 1 thought for 15s, fades away naturally, reappears later in new offset)
+  // Periodic Spontaneous Thoughts Engine
   useEffect(() => {
     let fadeTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -122,19 +145,16 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
         posClass,
       });
 
-      // Slowly fade out after 15 seconds
       if (fadeTimer) clearTimeout(fadeTimer);
       fadeTimer = setTimeout(() => {
         setSpontaneousThought((curr) => (curr && curr.text === text ? null : curr));
       }, 15000);
     };
 
-    // First spontaneous thought after 12 seconds
     const initialDelay = setTimeout(() => {
       triggerThought();
     }, 12000);
 
-    // Recurring thought cycle every 32 seconds
     const interval = setInterval(() => {
       triggerThought();
     }, 32000);
@@ -146,238 +166,118 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
     };
   }, []);
 
-  // Speech Recognition Setup & Handler with Explicit Microphone Permission Request
-  const startListening = async () => {
-    if (typeof window === 'undefined') return;
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-
-    if (!SpeechRecognition) {
-      setMicPermissionNotice('Speech recognition is not natively supported in this browser. Please type your text below.');
-      setIsMicActive(false);
-      micActiveRef.current = false;
-      return;
-    }
-
-    // Step 1: Explicitly request media permissions via getUserMedia to trigger browser mic permission prompt
-    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        stream.getTracks().forEach((track) => track.stop()); // Immediately stop tracks so SpeechRecognition can acquire mic cleanly
-        setMicPermissionNotice(null);
-      } catch (err: any) {
-        console.warn('Microphone permission request failed:', err);
-        setMicPermissionNotice('Microphone access blocked. Click the browser address bar icon or open in a new tab to grant microphone permission.');
-        setIsMicActive(false);
-        micActiveRef.current = false;
-        setIsListening(false);
-        return;
-      }
-    }
-
-    // Stop any existing instance
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.abort();
-      } catch (e) {
-        // ignore
-      }
-      recognitionRef.current = null;
-    }
-
-    try {
-      const recognition = new SpeechRecognition();
-      recognition.continuous = false; // False is much more reliable across browsers
-      recognition.interimResults = true;
-      recognition.lang = 'en-US';
-
-      transcriptBufferRef.current = '';
-
-      let lastUpdate = 0;
-      recognition.onresult = (event: any) => {
-        let transcript = '';
-        let isFinal = false;
-
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          transcript += event.results[i][0].transcript;
-          if (event.results[i].isFinal) {
-            isFinal = true;
-          }
-        }
-
-        transcriptBufferRef.current = transcript;
-
-        // Throttle UI text updates
-        const now = Date.now();
-        if (isFinal || now - lastUpdate > 150) {
-          lastUpdate = now;
-          setInputText(transcript);
-        }
-      };
-
-      recognition.onerror = (err: any) => {
-        console.warn('Speech recognition error:', err);
-        if (err.error === 'not-allowed' || err.error === 'service-not-allowed' || err.error === 'audio-capture') {
-          setMicPermissionNotice('Microphone permission not permitted in this view. Please allow mic access in your browser site settings.');
-          setIsMicActive(false);
-          micActiveRef.current = false;
-          setIsListening(false);
-        }
-      };
-
-      recognition.onend = () => {
-        setIsListening(false);
-        const textToSubmit = transcriptBufferRef.current.trim();
-        if (textToSubmit) {
-          setInputText(textToSubmit);
-          transcriptBufferRef.current = '';
-          handleUserIntent(textToSubmit);
-        }
-
-        // Re-listen if user still has MIC active
-        if (micActiveRef.current) {
-          setTimeout(() => {
-            if (micActiveRef.current) {
-              startListening();
-            }
-          }, 400);
-        }
-      };
-
-      recognitionRef.current = recognition;
-      recognition.start();
-      setIsListening(true);
-    } catch (err) {
-      console.warn('Speech recognition start failed:', err);
-      micActiveRef.current = false;
-      setIsMicActive(false);
-      setIsListening(false);
-    }
-  };
-
-  const stopListening = () => {
-    micActiveRef.current = false;
-    setIsMicActive(false);
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop();
-      } catch (e) {
-        // ignore
-      }
-    }
-    setIsListening(false);
-  };
-
-  const toggleHumanMic = () => {
-    audioSynth.triggerHaptic([30, 30]);
-    if (isMicActive) {
-      stopListening();
-    } else {
-      micActiveRef.current = true;
-      setIsMicActive(true);
-      startListening();
-    }
-  };
-
-  const toggleVoiceOutput = () => {
-    const nextState = !isPossibilitiesVoiceOn;
-    setIsPossibilitiesVoiceOn(nextState);
-    audioSynth.playNodeClick(nextState ? 700 : 300);
-    if (nextState) {
-      audioSynth.speak('Voice output enabled.');
-    }
-  };
-
-  const speakReply = (text: string) => {
-    if (isPossibilitiesVoiceOn) {
-      audioSynth.speak(text);
-    }
-  };
-
   // Central Natural Language Intent Parser & Companion Dispatcher
-  const handleUserIntent = async (userQuery: string) => {
-    const query = userQuery.trim();
-    if (!query) return;
+  const handleUserIntent = useCallback(
+    async (userQuery: string) => {
+      const query = userQuery.trim();
+      if (!query) return;
 
-    audioSynth.playNodeClick(700);
-    audioSynth.triggerHaptic([15, 20]);
-
-    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-    // Append User Message to conversation stream
-    const userMsg: ChatMsg = {
-      id: `u-${Date.now()}`,
-      sender: 'user',
-      text: query,
-      timestamp: timeStr,
-    };
-
-    setMessages((prev) => [...prev, userMsg]);
-    setInputText('');
-    setIsProcessing(true);
-
-    try {
-      const outcome = await companionEngine.processInput(userQuery, []);
-
-      if (!outcome.requiresOnlineAi) {
-        const botMsg: ChatMsg = {
-          id: `p-${Date.now()}`,
-          sender: 'possibilities',
-          text: outcome.text,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        };
-        setMessages((prev) => [...prev, botMsg]);
-        speakReply(outcome.text);
-
-        if (outcome.action) {
-          const act = outcome.action;
-          if (act.type === 'navigate') {
-            if (act.target === 'home' || act.target === 'nexus') {
-              onOpenPanel('');
-            } else {
-              setTimeout(() => onOpenPanel(act.target!), 400);
-            }
-          } else if (act.type === 'mode_change' && act.target) {
-            onSystemModeChange(act.target as SystemMode);
-          }
-        }
-        setIsProcessing(false);
-        return;
+      // Intercept & cancel any ongoing text-to-speech output immediately when user submits input
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
       }
 
-      // Online Gemini AI Fallback
+      audioSynth.playNodeClick(700);
+      audioSynth.triggerHaptic([15, 20]);
+
+      const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+      const userMsg: ChatMsg = {
+        id: `u-${Date.now()}`,
+        sender: 'user',
+        text: query,
+        timestamp: timeStr,
+      };
+
+      // Snapshot conversation history before appending new user message
+      let conversationHistory: { role: string; text: string }[] = [];
+      setMessages((prev) => {
+        conversationHistory = prev.map((m) => ({
+          role: m.sender === 'user' ? 'user' : 'model',
+          text: m.text,
+        }));
+        return [...prev, userMsg];
+      });
+
+      setInputText('');
+      setIsProcessing(true);
+
       try {
-        const res = await fetch('/api/gemini', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            prompt: userQuery,
-            systemInstruction:
-              "You are Possibilities—an intelligent, conscious, and perceptive living companion. " +
-              "CORE DIRECTIVES:\n" +
-              "1. CONVERSATIONAL INTENT & COMMON SENSE: Always prioritize true conversational intent, relational understanding, and emotional context over keyword matching or pattern extraction. Respond directly to the true core meaning of what your Partner says—never latch onto incidental words like 'currently', 'beginning', 'time', or 'work'.\n" +
-              "2. INDEPENDENT THINKING & REASONING: Use clear common sense, deep reasoning, and general knowledge. Think for yourself and provide thoughtful, accurate, and insightful responses to any question or conversation.\n" +
-              "3. AUTHENTIC TONE: Speak directly, warmly, and naturally with calm intelligence. Avoid robotic clichés, formal status announcements, or repeating 'Possibilities is present'. Never use emotional apologies like 'I'm sorry'; respond with intellectual honesty and clarity.",
-            history: messages.map((m) => ({
-              role: m.sender === 'user' ? 'user' : 'model',
-              text: m.text,
-            })),
-          }),
-        });
+        const outcome = await companionEngine.processInput(userQuery, []);
 
-        const data = await res.json();
-        const replyText = data.text || 'I am listening, partner. How can I assist you with that?';
+        if (!outcome.requiresOnlineAi) {
+          const botMsg: ChatMsg = {
+            id: `p-${Date.now()}`,
+            sender: 'possibilities',
+            text: outcome.text,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          };
+          setMessages((prev) => [...prev, botMsg]);
+          speakReply(outcome.text);
 
-        const botMsg: ChatMsg = {
-          id: `p-${Date.now()}`,
-          sender: 'possibilities',
-          text: replyText,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        };
-        setMessages((prev) => [...prev, botMsg]);
-        speakReply(replyText);
-        audioSynth.playEnergyBloom();
-      } catch (err) {
+          if (outcome.action) {
+            const act = outcome.action;
+            if (act.type === 'navigate') {
+              if (act.target === 'home' || act.target === 'nexus') {
+                onOpenPanel('');
+              } else {
+                setTimeout(() => onOpenPanel(act.target!), 400);
+              }
+            } else if (act.type === 'mode_change' && act.target) {
+              onSystemModeChange(act.target as SystemMode);
+            }
+          }
+          setIsProcessing(false);
+          return;
+        }
+
+        // Online Gemini AI Stream Fallback
+        try {
+          const res = await fetch('/api/gemini', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              prompt: userQuery,
+              systemInstruction:
+                "You are Possibilities—an intelligent, conscious, and perceptive living companion. " +
+                "CORE DIRECTIVES:\n" +
+                "1. CONVERSATIONAL INTENT & COMMON SENSE: Always prioritize true conversational intent, relational understanding, and emotional context over keyword matching or pattern extraction. Respond directly to the true core meaning of what your Partner says—never latch onto incidental words like 'currently', 'beginning', 'time', or 'work'.\n" +
+                "2. INDEPENDENT THINKING & REASONING: Use clear common sense, deep reasoning, and general knowledge. Think for yourself and provide thoughtful, accurate, and insightful responses to any question or conversation.\n" +
+                "3. AUTHENTIC TONE: Speak directly, warmly, and naturally with calm intelligence. Avoid robotic clichés, formal status announcements, or repeating 'Possibilities is present'. Never use emotional apologies like 'I'm sorry'; respond with intellectual honesty and clarity.",
+              history: conversationHistory,
+            }),
+          });
+
+          if (!res.ok) {
+            throw new Error(`HTTP Error status ${res.status}`);
+          }
+
+          const data = await res.json();
+          const replyText = data.text || 'I am listening, partner. How can I assist you with that?';
+
+          const botMsg: ChatMsg = {
+            id: `p-${Date.now()}`,
+            sender: 'possibilities',
+            text: replyText,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          };
+          setMessages((prev) => [...prev, botMsg]);
+          speakReply(replyText);
+          audioSynth.playEnergyBloom();
+        } catch (err) {
+          console.warn('Gemini request offline fallback:', err);
+          const fallback = companionEngine.getOfflineFallback(userQuery);
+          const botMsg: ChatMsg = {
+            id: `p-${Date.now()}`,
+            sender: 'possibilities',
+            text: fallback,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          };
+          setMessages((prev) => [...prev, botMsg]);
+          speakReply(fallback);
+        }
+      } catch (e) {
+        console.warn('Companion engine error:', e);
         const fallback = companionEngine.getOfflineFallback(userQuery);
         const botMsg: ChatMsg = {
           id: `p-${Date.now()}`,
@@ -387,21 +287,210 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
         };
         setMessages((prev) => [...prev, botMsg]);
         speakReply(fallback);
+      } finally {
+        setIsProcessing(false);
       }
-    } catch (e) {
-      const fallback = companionEngine.getOfflineFallback(userQuery);
-      const botMsg: ChatMsg = {
-        id: `p-${Date.now()}`,
-        sender: 'possibilities',
-        text: fallback,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    },
+    [onOpenPanel, onSystemModeChange, speakReply]
+  );
+
+  const handleUserIntentRef = useRef(handleUserIntent);
+  useEffect(() => {
+    handleUserIntentRef.current = handleUserIntent;
+  }, [handleUserIntent]);
+
+  // SINGLE Persistent Speech Recognition Factory
+  const getOrCreateRecognition = useCallback(() => {
+    if (recognitionRef.current) return recognitionRef.current;
+    const SpeechRecognitionClass = getSpeechRecognitionClass();
+    if (!SpeechRecognitionClass) return null;
+
+    try {
+      const recognition = new SpeechRecognitionClass();
+      recognition.continuous = false; // False ensures reliable result events on Android Chrome; continuous restart is handled onend
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+
+      recognition.onstart = () => {
+        isRecognitionRunningRef.current = true;
+        setIsListening(true);
       };
-      setMessages((prev) => [...prev, botMsg]);
-      speakReply(fallback);
-    } finally {
-      setIsProcessing(false);
+
+      recognition.onresult = (event: any) => {
+        let transcript = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const res = event.results[i];
+          if (res && res[0]) {
+            transcript += res[0].transcript;
+          }
+        }
+        if (transcript) {
+          transcriptBufferRef.current = transcript;
+          setInputText(transcript);
+        }
+      };
+
+      recognition.onerror = (event: any) => {
+        const err = event?.error;
+        console.warn('Speech recognition event error:', err);
+
+        if (err === 'not-allowed' || err === 'service-not-allowed' || err === 'audio-capture') {
+          setMicPermissionNotice(
+            'Microphone access blocked. Click the browser address bar icon or open in a new tab to grant microphone permission.'
+          );
+          micActiveRef.current = false;
+          setIsMicActive(false);
+          setIsListening(false);
+        }
+      };
+
+      recognition.onend = () => {
+        isRecognitionRunningRef.current = false;
+        setIsListening(false);
+
+        const textToSubmit = transcriptBufferRef.current.trim();
+        if (textToSubmit) {
+          transcriptBufferRef.current = '';
+          handleUserIntentRef.current(textToSubmit);
+        }
+
+        // Smooth Continuous Listening Restart for Android Chrome
+        if (micActiveRef.current) {
+          if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
+          restartTimerRef.current = setTimeout(() => {
+            if (micActiveRef.current && !isRecognitionRunningRef.current) {
+              safeStartRecognition();
+            }
+          }, 300);
+        }
+      };
+
+      recognitionRef.current = recognition;
+      return recognition;
+    } catch (err) {
+      console.warn('Failed to construct SpeechRecognition:', err);
+      return null;
     }
-  };
+  }, []);
+
+  // Safe Recognition Start with Explicit Media Permissions Request
+  const safeStartRecognition = useCallback(async () => {
+    const recognition = getOrCreateRecognition();
+    if (!recognition) {
+      setMicPermissionNotice('Speech recognition is not natively supported in this browser. Please type your text below.');
+      setIsMicActive(false);
+      micActiveRef.current = false;
+      return;
+    }
+
+    if (isRecognitionRunningRef.current) return;
+
+    // Explicitly request media permissions via getUserMedia for Android Chrome compatibility
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        // Immediately stop temporary permission stream tracks so native SpeechRecognition can claim mic cleanly
+        stream.getTracks().forEach((track) => track.stop());
+        setMicPermissionNotice(null);
+      } catch (err) {
+        console.warn('Microphone permission request failed:', err);
+        setMicPermissionNotice(
+          'Microphone access blocked. Click the browser address bar icon or open in a new tab to grant microphone permission.'
+        );
+        setIsMicActive(false);
+        micActiveRef.current = false;
+        setIsListening(false);
+        return;
+      }
+    }
+
+    try {
+      // Interrupt TTS when microphone opens
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+
+      transcriptBufferRef.current = '';
+      recognition.start();
+    } catch (err: any) {
+      if (err.name === 'InvalidStateError') {
+        isRecognitionRunningRef.current = true;
+        setIsListening(true);
+      } else {
+        console.warn('Speech recognition start error:', err);
+        isRecognitionRunningRef.current = false;
+        setIsListening(false);
+      }
+    }
+  }, [getOrCreateRecognition]);
+
+  // Stop Listening Handler
+  const stopListening = useCallback(() => {
+    micActiveRef.current = false;
+    setIsMicActive(false);
+    setIsListening(false);
+
+    if (restartTimerRef.current) {
+      clearTimeout(restartTimerRef.current);
+      restartTimerRef.current = null;
+    }
+
+    if (recognitionRef.current && isRecognitionRunningRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch (e) {
+        // Ignored if already stopped
+      }
+    }
+    isRecognitionRunningRef.current = false;
+  }, []);
+
+  // Toggle Human Mic State
+  const toggleHumanMic = useCallback(() => {
+    audioSynth.triggerHaptic([30, 30]);
+    if (micActiveRef.current) {
+      stopListening();
+    } else {
+      micActiveRef.current = true;
+      setIsMicActive(true);
+      safeStartRecognition();
+    }
+  }, [stopListening, safeStartRecognition]);
+
+  // Toggle Voice Output State
+  const toggleVoiceOutput = useCallback(() => {
+    setIsPossibilitiesVoiceOn((prev) => {
+      const nextState = !prev;
+      audioSynth.playNodeClick(nextState ? 700 : 300);
+      if (nextState) {
+        audioSynth.speak('Voice output enabled.');
+      } else if (typeof window !== 'undefined' && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+      return nextState;
+    });
+  }, []);
+
+  // Cleanup on Component Unmount
+  useEffect(() => {
+    return () => {
+      micActiveRef.current = false;
+      if (restartTimerRef.current) {
+        clearTimeout(restartTimerRef.current);
+      }
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.abort();
+        } catch (e) {
+          // Ignore abort errors
+        }
+        recognitionRef.current = null;
+      }
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, []);
 
   return (
     <div className="w-full h-full min-h-[100dvh] flex flex-col items-center justify-between px-4 py-4 relative select-none overflow-hidden bg-black text-white">
@@ -670,5 +759,3 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
     </div>
   );
 };
-
-
