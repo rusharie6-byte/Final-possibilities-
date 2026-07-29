@@ -15,7 +15,7 @@ import { SystemMode } from '../types';
 import { AmbientParticlesCanvas } from './AmbientParticlesCanvas';
 import { audioSynth } from '../utils/audioSynthesizer';
 import { companionEngine } from '../utils/companionEngine';
-import { getApiEndpoint } from '../lib/api';
+import { getApiEndpoint, loggedFetch } from '../lib/api';
 
 const orbImageUrl = new URL('../assets/images/crystal_orb_asset_1785163496547.jpg', import.meta.url).href;
 
@@ -76,7 +76,7 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
     const checkApiHealth = async () => {
       try {
         const url = getApiEndpoint('/api/health');
-        const res = await fetch(url, { signal: AbortSignal.timeout(4000) });
+        const res = await loggedFetch(url, { signal: AbortSignal.timeout(4000) });
         if (isMounted) {
           setIsApiOnline(res.ok);
         }
@@ -331,7 +331,7 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
         // Online Gemini AI Stream Fallback
         try {
           const apiUrl = getApiEndpoint('/api/gemini');
-          const res = await fetch(apiUrl, {
+          const res = await loggedFetch(apiUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({

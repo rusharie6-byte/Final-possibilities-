@@ -80,3 +80,120 @@ export const getApiEndpoint = (path: string): string => {
 
   return cleanPath;
 };
+
+export interface NetworkLogEntry {
+  id: string;
+  timestamp: string;
+  method: string;
+  url: string;
+  status?: number;
+  statusText?: string;
+  body?: string;
+  error?: string;
+  durationMs?: number;
+}
+
+type LogListener = (logs: NetworkLogEntry[]) => void;
+
+let networkLogsStore: NetworkLogEntry[] = [];
+const logListeners: Set<LogListener> = new Set();
+
+export const subscribeNetworkLogs = (listener: LogListener): (() => void) => {
+  logListeners.add(listener);
+  listener([...networkLogsStore]);
+  return () => {
+    logListeners.delete(listener);
+  };
+};
+
+export const clearNetworkLogs = () => {
+  networkLogsStore = [];
+  logListeners.forEach((fn) => fn([]));
+};
+
+const addNetworkLogEntry = (entry: NetworkLogEntry) => {
+  networkLogsStore = [entry, ...networkLogsStore].slice(0, 50);
+  logListeners.forEach((fn) => fn([...networkLogsStore]));
+};
+
+/**
+ * Wrapper for window.fetch that logs:
+ * - Exact URL being called
+ * - HTTP method
+ * - Response status
+ * - Response body
+ * - Any fetch error
+ */
+export const loggedFetch = async (
+  input: RequestInfo | URL,
+  init?: RequestInit
+): Promise<Response> => {
+  const urlString =
+    typeof input === 'string'
+      ? input
+      : input instanceof URL
+      ? input.toString()
+      : input.url;
+
+  const method = init?.method || 'GET';
+  const startTime = Date.now();
+  const id = `log_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
+  const timestamp = new Date().toLocaleTimeString();
+
+  console.log(`[NETWORK REQUEST] Method: ${method} | URL: ${urlString}`);
+
+  try {
+    const response = await fetch(input, init);
+    const durationMs = Date.now() - startTime;
+
+    // Clone response to read body without consuming original stream
+    const clone = response.clone();
+    let bodyText = '';
+    try {
+      bodyText = await clone.text();
+    } catch (e) {
+      bodyText = '[Unreadable body stream]';
+    }
+
+    console.log(
+      `[NETWORK RESPONSE] URL: ${urlString} | Status: ${response.status} ${response.statusText} | Body: ${
+        bodyText.length > 500 ? bodyText.substring(0, 500) + '...' : bodyText
+      }`
+    );
+
+    addNetworkLogEntry({
+      id,
+      timestamp,
+      method,
+      url: urlString,
+      status: response.status,
+      statusText: response.statusText,
+      body: bodyText,
+      durationMs,
+    });
+
+    return response;
+  } catch (error: any) {
+    const durationMs = Date.now() - startTime;
+    const errMsg = error?.message || String(error) || 'Failed to fetch (ERR_CONNECTION_REFUSED or Network Failure)';
+
+    console.error(
+      `[NETWORK ERROR] URL: ${urlString} | Method: ${method} | Error:`,
+      error
+    );
+
+    addNetworkLogEntry({
+      id,
+      timestamp,
+      method,
+      url: urlString,
+      status: 0,
+      statusText: 'FETCH_ERROR',
+      error: errMsg,
+      durationMs,
+    });
+
+    throw error;
+  }
+};
+

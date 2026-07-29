@@ -12,6 +12,7 @@ import { OrbDefenseView } from './components/OrbDefenseView';
 import { AmbientParticlesCanvas } from './components/AmbientParticlesCanvas';
 import { SearchOverlay } from './components/SearchOverlay';
 import { SettingsModal } from './components/SettingsModal';
+import { DebugNetworkPanel } from './components/DebugNetworkPanel';
 import { audioSynth } from './utils/audioSynthesizer';
 
 export default function App() {
@@ -85,6 +86,9 @@ export default function App() {
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
       />
+
+      {/* On-Screen Network Debug Panel */}
+      <DebugNetworkPanel />
 
       {/* Main Environment Container */}
       <main className="flex-1 flex flex-col items-center justify-center relative w-full">
