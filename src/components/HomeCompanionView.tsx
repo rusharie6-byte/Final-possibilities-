@@ -8,6 +8,8 @@ import {
   User,
   Copy,
   Check,
+  Brain,
+  Trash2,
 } from 'lucide-react';
 import { SystemMode } from '../types';
 import { AmbientParticlesCanvas } from './AmbientParticlesCanvas';
@@ -30,6 +32,8 @@ interface ChatMsg {
   timestamp: string;
 }
 
+const CHAT_HISTORY_STORAGE_KEY = 'possibilities_chat_history_v1';
+
 // Spontaneous thoughts pool that Possibilities naturally expresses beside the Partner
 const SPONTANEOUS_THOUGHTS = [
   "Remember to finish packing.",
@@ -40,6 +44,32 @@ const SPONTANEOUS_THOUGHTS = [
   "Take a deep breath. I'm right here.",
   "Focus on what brings clarity today.",
 ];
+
+// Helper to determine the backend API base endpoint for both Web and Capacitor Native APK
+const getApiEndpoint = (path: string): string => {
+  if (typeof window === 'undefined') return path;
+  
+  // Custom API Base URL if configured in environment
+  const customBase = (import.meta as any).env?.VITE_API_BASE_URL;
+  if (customBase && typeof customBase === 'string' && customBase.trim() !== '') {
+    const base = customBase.replace(/\/+$/, '');
+    return `${base}${path.startsWith('/') ? path : '/' + path}`;
+  }
+
+  // If running inside Capacitor Native Android / iOS WebView (capacitor://, file://, http://localhost)
+  const isCapacitorNative =
+    window.location.protocol === 'capacitor:' ||
+    window.location.protocol === 'file:' ||
+    (window.location.hostname === 'localhost' && typeof (window as any).Capacitor !== 'undefined');
+
+  if (isCapacitorNative) {
+    // If running in APK native webview and no external VITE_API_BASE_URL set,
+    // fallback gracefully to current origin or relative path
+    return path;
+  }
+
+  return path;
+};
 
 // Browser helper for SpeechRecognition compatibility
 const getSpeechRecognitionClass = (): any => {
@@ -62,15 +92,78 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
   // 🔮 POSSIBILITIES Voice Output Toggle (Speaker ON / OFF)
   const [isPossibilitiesVoiceOn, setIsPossibilitiesVoiceOn] = useState(true);
 
-  // Conversation history stream rendered on screen
-  const [messages, setMessages] = useState<ChatMsg[]>([
-    {
-      id: 'init-1',
-      sender: 'possibilities',
-      text: "Possibilities is present, partner. What's on your mind?",
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    },
-  ]);
+  // 🌐 API Health State (Online = Orb Alive with breathing motion; Offline = Orb Stable)
+  const [isApiOnline, setIsApiOnline] = useState<boolean>(true);
+
+  // Periodically monitor API health status
+  useEffect(() => {
+    let isMounted = true;
+    const checkApiHealth = async () => {
+      try {
+        const url = getApiEndpoint('/api/health');
+        const res = await fetch(url, { signal: AbortSignal.timeout(4000) });
+        if (isMounted) {
+          setIsApiOnline(res.ok);
+        }
+      } catch (e) {
+        if (isMounted) {
+          setIsApiOnline(typeof navigator !== 'undefined' ? navigator.onLine : false);
+        }
+      }
+    };
+
+    checkApiHealth();
+    const interval = setInterval(checkApiHealth, 12000);
+    const handleOnline = () => {
+      setIsApiOnline(true);
+      checkApiHealth();
+    };
+    const handleOffline = () => setIsApiOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // Persistent Conversation History Stream
+  const [messages, setMessages] = useState<ChatMsg[]>(() => {
+    try {
+      const saved = localStorage.getItem(CHAT_HISTORY_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+    return [
+      {
+        id: 'init-1',
+        sender: 'possibilities',
+        text: "Possibilities is present, partner. What's on your mind?",
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      },
+    ];
+  });
+
+  // Save conversation messages to localStorage whenever messages state updates
+  useEffect(() => {
+    try {
+      // Keep last 50 messages to preserve memory without bloating storage
+      const historyToSave = messages.slice(-50);
+      localStorage.setItem(CHAT_HISTORY_STORAGE_KEY, JSON.stringify(historyToSave));
+    } catch (e) {
+      // ignore
+    }
+  }, [messages]);
 
   // 💭 Spontaneous Reminder Thought (Floats naturally, fades after 15s, rotates every ~32s)
   const [spontaneousThought, setSpontaneousThought] = useState<{
@@ -166,6 +259,23 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
     };
   }, []);
 
+  // Clear chat history handler
+  const handleClearChatHistory = useCallback(() => {
+    audioSynth.playNodeClick(400);
+    const resetMsg: ChatMsg = {
+      id: `reset-${Date.now()}`,
+      sender: 'possibilities',
+      text: "Conversation history cleared. Possibilities is ready for new thoughts.",
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+    setMessages([resetMsg]);
+    try {
+      localStorage.removeItem(CHAT_HISTORY_STORAGE_KEY);
+    } catch (e) {
+      // ignore
+    }
+  }, []);
+
   // Central Natural Language Intent Parser & Companion Dispatcher
   const handleUserIntent = useCallback(
     async (userQuery: string) => {
@@ -231,19 +341,27 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
           return;
         }
 
+        // Generate Memory System Context to append to Gemini system instructions
+        const memoryContext = companionEngine.getMemoryPromptContext();
+
+        const fullSystemInstruction =
+          "You are Possibilities—an intelligent, conscious, perceptive living companion.\n" +
+          "CORE DIRECTIVES:\n" +
+          "1. CONVERSATIONAL INTENT & COMMON SENSE: Always prioritize true conversational intent, relational understanding, and emotional context over keyword matching. Respond directly to the core meaning of what your Partner says.\n" +
+          "2. LONG TERM MEMORY ACCURACY: You have a persistent long-term memory system. Retain and recall all key facts, names, preferences, and directives provided by your partner.\n" +
+          "3. INDEPENDENT THINKING & REASONING: Use clear common sense, deep reasoning, and general knowledge. Provide thoughtful, accurate, and insightful responses.\n" +
+          "4. AUTHENTIC TONE: Speak directly, warmly, and naturally with calm intelligence. Avoid robotic clichés or repeating 'Possibilities is present'." +
+          memoryContext;
+
         // Online Gemini AI Stream Fallback
         try {
-          const res = await fetch('/api/gemini', {
+          const apiUrl = getApiEndpoint('/api/gemini');
+          const res = await fetch(apiUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               prompt: userQuery,
-              systemInstruction:
-                "You are Possibilities—an intelligent, conscious, and perceptive living companion. " +
-                "CORE DIRECTIVES:\n" +
-                "1. CONVERSATIONAL INTENT & COMMON SENSE: Always prioritize true conversational intent, relational understanding, and emotional context over keyword matching or pattern extraction. Respond directly to the true core meaning of what your Partner says—never latch onto incidental words like 'currently', 'beginning', 'time', or 'work'.\n" +
-                "2. INDEPENDENT THINKING & REASONING: Use clear common sense, deep reasoning, and general knowledge. Think for yourself and provide thoughtful, accurate, and insightful responses to any question or conversation.\n" +
-                "3. AUTHENTIC TONE: Speak directly, warmly, and naturally with calm intelligence. Avoid robotic clichés, formal status announcements, or repeating 'Possibilities is present'. Never use emotional apologies like 'I'm sorry'; respond with intellectual honesty and clarity.",
+              systemInstruction: fullSystemInstruction,
               history: conversationHistory,
             }),
           });
@@ -265,7 +383,7 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
           speakReply(replyText);
           audioSynth.playEnergyBloom();
         } catch (err) {
-          console.warn('Gemini request offline fallback:', err);
+          console.warn('Gemini request fallback:', err);
           const fallback = companionEngine.getOfflineFallback(userQuery);
           const botMsg: ChatMsg = {
             id: `p-${Date.now()}`,
@@ -336,7 +454,7 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
 
         if (err === 'not-allowed' || err === 'service-not-allowed' || err === 'audio-capture') {
           setMicPermissionNotice(
-            'Microphone access blocked. Click the browser address bar icon or open in a new tab to grant microphone permission.'
+            'Microphone access blocked. Enable microphone permission in Android device settings or app permissions.'
           );
           micActiveRef.current = false;
           setIsMicActive(false);
@@ -354,7 +472,7 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
           handleUserIntentRef.current(textToSubmit);
         }
 
-        // Smooth Continuous Listening Restart for Android Chrome
+        // Smooth Continuous Listening Restart for Android
         if (micActiveRef.current) {
           if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
           restartTimerRef.current = setTimeout(() => {
@@ -377,7 +495,7 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
   const safeStartRecognition = useCallback(async () => {
     const recognition = getOrCreateRecognition();
     if (!recognition) {
-      setMicPermissionNotice('Speech recognition is not natively supported in this browser. Please type your text below.');
+      setMicPermissionNotice('Speech recognition is not natively supported in this environment. Please type your input below.');
       setIsMicActive(false);
       micActiveRef.current = false;
       return;
@@ -385,7 +503,7 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
 
     if (isRecognitionRunningRef.current) return;
 
-    // Explicitly request media permissions via getUserMedia for Android Chrome compatibility
+    // Explicitly request media permissions via getUserMedia for Android compatibility
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -395,7 +513,7 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
       } catch (err) {
         console.warn('Microphone permission request failed:', err);
         setMicPermissionNotice(
-          'Microphone access blocked. Click the browser address bar icon or open in a new tab to grant microphone permission.'
+          'Microphone access blocked. Enable microphone permission in your Android app permissions.'
         );
         setIsMicActive(false);
         micActiveRef.current = false;
@@ -504,24 +622,32 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
           alt="Possibilities Screen Environment"
           initial={{ scale: 1 }}
           animate={{
-            scale: isListening ? [1.02, 1.06, 1.02] : isProcessing ? [1.01, 1.04, 1.01] : [1, 1.03, 1],
-            filter: isListening
-              ? 'brightness(1.15) contrast(1.05)'
+            scale: !isApiOnline
+              ? 1.0 // STABLE state when API is offline
+              : isListening
+              ? [1.02, 1.08, 1.02] // Alive breathing when listening
               : isProcessing
-              ? 'brightness(1.08) contrast(1.02)'
-              : 'brightness(1.0) contrast(1.0)',
+              ? [1.02, 1.06, 1.02] // Alive breathing when processing
+              : [1.0, 1.05, 1.0], // Alive continuous breathing motion when API online
+            filter: !isApiOnline
+              ? 'brightness(0.85) contrast(0.95)' // Stable calm state when offline
+              : isListening
+              ? 'brightness(1.20) contrast(1.08)'
+              : isProcessing
+              ? 'brightness(1.12) contrast(1.04)'
+              : 'brightness(1.06) contrast(1.02)', // Living breathing bloom when online
           }}
           transition={{
-            duration: isListening ? 4 : isProcessing ? 5 : 12,
-            repeat: Infinity,
+            duration: !isApiOnline ? 1.5 : isListening ? 3 : isProcessing ? 4 : 8,
+            repeat: !isApiOnline ? 0 : Infinity,
             ease: 'easeInOut',
           }}
-          className="w-full h-full object-cover object-center"
+          className="w-full h-full object-cover object-center transition-all duration-700"
         />
 
         {/* Ambient Stardust Floating Particles Overlay */}
         <div className="absolute inset-0 opacity-70">
-          <AmbientParticlesCanvas systemMode={systemMode} isEnergized={isListening || isProcessing} />
+          <AmbientParticlesCanvas systemMode={systemMode} isEnergized={isApiOnline && (isListening || isProcessing || true)} />
         </div>
 
         {/* Dynamic Dark Vignette Layer for High Visual Contrast */}
@@ -534,14 +660,33 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
       </div>
 
       {/* ──────────────────────────────────────────────────────────── */}
-      {/* TOP HEADER: SPEAKER & MIC VOICE TOGGLES */}
+      {/* TOP HEADER: SPEAKER, MIC, ORB HEALTH & MEMORY CONTROLS */}
       {/* ──────────────────────────────────────────────────────────── */}
       <motion.div
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
         className="w-full max-w-xl flex items-center justify-between px-2 pt-1 relative z-20"
       >
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2">
+          {/* Orb Health Status Indicator (Alive when API Online / Stable when Offline) */}
+          <div
+            className={`px-2.5 py-1.5 rounded-full border text-[10px] font-mono font-bold tracking-wider flex items-center gap-1.5 backdrop-blur-xl ${
+              isApiOnline
+                ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40 shadow-[0_0_15px_rgba(16,185,129,0.3)]'
+                : 'bg-zinc-950/80 text-amber-300 border-amber-500/40'
+            }`}
+            title={isApiOnline ? 'API Online — Orb Alive with breathing motion' : 'API Offline — Orb Stable in local mode'}
+          >
+            <span
+              className={`w-2 h-2 rounded-full ${
+                isApiOnline
+                  ? 'bg-emerald-400 animate-pulse shadow-[0_0_8px_#10B981]'
+                  : 'bg-amber-400'
+              }`}
+            />
+            <span className="hidden sm:inline">{isApiOnline ? 'ORB ALIVE' : 'ORB STABLE'}</span>
+          </div>
+
           {/* Voice Output (TTS) Toggle */}
           <button
             onClick={toggleVoiceOutput}
@@ -563,31 +708,58 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
             </div>
             <span>{isPossibilitiesVoiceOn ? 'SPEAKER ON' : 'SPEAKER OFF'}</span>
           </button>
+
+          {/* Quick Memory Access Badge */}
+          <button
+            onClick={() => {
+              audioSynth.playNodeClick(600);
+              onOpenPanel('memory');
+            }}
+            className="px-2.5 py-1.5 rounded-full bg-zinc-950/80 hover:bg-purple-950/80 text-purple-300 border border-purple-500/30 text-[11px] font-semibold flex items-center gap-1.5 transition-all backdrop-blur-xl"
+            title="Open Long Term Memory Vault"
+          >
+            <Brain className="w-3.5 h-3.5 text-purple-400" />
+            <span className="hidden sm:inline">MEMORY</span>
+            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-purple-900/60 border border-purple-400/30 text-purple-200">
+              {companionEngine.getLongTermMemories().length}
+            </span>
+          </button>
         </div>
 
-        {/* Right Top: Voice Input Mic Toggle */}
-        <button
-          type="button"
-          onClick={toggleHumanMic}
-          className={`px-3 py-1.5 rounded-full border text-[11px] font-semibold tracking-wide transition-all flex items-center gap-2 backdrop-blur-xl ${
-            isMicActive
-              ? 'bg-purple-600 text-white border-purple-400 shadow-[0_0_20px_rgba(168,85,247,0.6)] animate-pulse'
-              : 'bg-zinc-900/90 text-purple-300 border-purple-500/30 hover:border-purple-400 hover:text-purple-200'
-          }`}
-          title="Toggle Voice Input (ON / OFF)"
-        >
-          {isMicActive ? (
-            <>
-              <Mic className="w-3.5 h-3.5 text-white" />
-              <span>MIC ON</span>
-            </>
-          ) : (
-            <>
-              <MicOff className="w-3.5 h-3.5 text-purple-300" />
-              <span>MIC OFF</span>
-            </>
-          )}
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Clear Chat Stream Button */}
+          <button
+            onClick={handleClearChatHistory}
+            className="p-2 rounded-full bg-zinc-950/80 hover:bg-rose-950/80 text-zinc-400 hover:text-rose-300 border border-zinc-800 hover:border-rose-500/40 transition-all backdrop-blur-xl"
+            title="Clear Chat History Stream"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+
+          {/* Right Top: Voice Input Mic Toggle */}
+          <button
+            type="button"
+            onClick={toggleHumanMic}
+            className={`px-3 py-1.5 rounded-full border text-[11px] font-semibold tracking-wide transition-all flex items-center gap-2 backdrop-blur-xl ${
+              isMicActive
+                ? 'bg-purple-600 text-white border-purple-400 shadow-[0_0_20px_rgba(168,85,247,0.6)] animate-pulse'
+                : 'bg-zinc-900/90 text-purple-300 border-purple-500/30 hover:border-purple-400 hover:text-purple-200'
+            }`}
+            title="Toggle Voice Input (ON / OFF)"
+          >
+            {isMicActive ? (
+              <>
+                <Mic className="w-3.5 h-3.5 text-white" />
+                <span>MIC ON</span>
+              </>
+            ) : (
+              <>
+                <MicOff className="w-3.5 h-3.5 text-purple-300" />
+                <span>MIC OFF</span>
+              </>
+            )}
+          </button>
+        </div>
       </motion.div>
 
       {/* Microphone Permission Notice Banner */}
@@ -651,7 +823,7 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
                       : 'rounded-tl-xs bg-zinc-950/85 border-purple-500/30 text-purple-100 font-medium shadow-[0_10px_30px_rgba(0,0,0,0.8)]'
                   }`}
                 >
-                  <p>{m.text}</p>
+                  <p className="whitespace-pre-wrap">{m.text}</p>
                   <div className="mt-2 pt-1.5 border-t border-purple-500/20 flex items-center justify-end">
                     <button
                       onClick={() => handleCopyMsg(m.id, m.text)}

@@ -21,6 +21,11 @@ async function startServer() {
   });
   app.use(express.json({ limit: '10mb' }));
 
+  // Health check endpoint for API status
+  app.get("/api/health", (req, res) => {
+    res.json({ status: "ok", alive: true, timestamp: Date.now() });
+  });
+
   // Server-side Gemini API endpoint
   app.post("/api/gemini", async (req, res) => {
     try {
