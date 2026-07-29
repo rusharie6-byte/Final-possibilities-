@@ -42,12 +42,16 @@ export const getApiBaseUrl = (): string => {
     (import.meta as any).env?.VITE_BACKEND_URL ||
     (import.meta as any).env?.VITE_API_BASE_URL;
 
-  if (envBase && typeof envBase === 'string' && envBase.trim() !== '') {
-    return envBase.replace(/\/+$/, '');
+  if (isCapacitorNative()) {
+    // Native Android APK cannot authenticate against internal ais-dev auth proxies
+    if (envBase && typeof envBase === 'string' && envBase.trim() !== '' && !envBase.includes('ais-dev')) {
+      return envBase.replace(/\/+$/, '');
+    }
+    return DEFAULT_DEPLOYED_BACKEND_URL.replace(/\/+$/, '');
   }
 
-  if (isCapacitorNative()) {
-    return DEFAULT_DEPLOYED_BACKEND_URL.replace(/\/+$/, '');
+  if (envBase && typeof envBase === 'string' && envBase.trim() !== '') {
+    return envBase.replace(/\/+$/, '');
   }
 
   if (typeof window !== 'undefined' && window.location && window.location.origin) {
@@ -74,7 +78,8 @@ export const getApiEndpoint = (path: string): string => {
     (import.meta as any).env?.VITE_BACKEND_URL ||
     (import.meta as any).env?.VITE_API_BASE_URL;
 
-  if (envBase && typeof envBase === 'string' && envBase.trim() !== '') {
+  // On web browser inside AI Studio or dev container, prefer relative path for same-origin
+  if (envBase && typeof envBase === 'string' && envBase.trim() !== '' && !envBase.includes('ais-dev')) {
     return `${envBase.replace(/\/+$/, '')}${cleanPath}`;
   }
 
