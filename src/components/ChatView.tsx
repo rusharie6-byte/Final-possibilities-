@@ -3,6 +3,7 @@ import { motion } from 'motion/react';
 import { MessageSquareCode, Send, Volume2, VolumeX, Sparkles, Bot, User, RefreshCw, Mic, MicOff, Copy, Check } from 'lucide-react';
 import { ChatMessage } from '../types';
 import { audioSynth } from '../utils/audioSynthesizer';
+import { getApiEndpoint } from '../lib/api';
 
 const INITIAL_MESSAGES: ChatMessage[] = [
   {
@@ -130,7 +131,8 @@ export const ChatView: React.FC = () => {
     setIsSending(true);
 
     try {
-      const res = await fetch('/api/gemini', {
+      const apiUrl = getApiEndpoint('/api/gemini');
+      const res = await fetch(apiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

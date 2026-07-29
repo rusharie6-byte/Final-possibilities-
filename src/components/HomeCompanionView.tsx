@@ -15,6 +15,7 @@ import { SystemMode } from '../types';
 import { AmbientParticlesCanvas } from './AmbientParticlesCanvas';
 import { audioSynth } from '../utils/audioSynthesizer';
 import { companionEngine } from '../utils/companionEngine';
+import { getApiEndpoint } from '../lib/api';
 
 const orbImageUrl = new URL('../assets/images/crystal_orb_asset_1785163496547.jpg', import.meta.url).href;
 
@@ -44,32 +45,6 @@ const SPONTANEOUS_THOUGHTS = [
   "Take a deep breath. I'm right here.",
   "Focus on what brings clarity today.",
 ];
-
-// Helper to determine the backend API base endpoint for both Web and Capacitor Native APK
-const getApiEndpoint = (path: string): string => {
-  if (typeof window === 'undefined') return path;
-  
-  // Custom API Base URL if configured in environment
-  const customBase = (import.meta as any).env?.VITE_API_BASE_URL;
-  if (customBase && typeof customBase === 'string' && customBase.trim() !== '') {
-    const base = customBase.replace(/\/+$/, '');
-    return `${base}${path.startsWith('/') ? path : '/' + path}`;
-  }
-
-  // If running inside Capacitor Native Android / iOS WebView (capacitor://, file://, http://localhost)
-  const isCapacitorNative =
-    window.location.protocol === 'capacitor:' ||
-    window.location.protocol === 'file:' ||
-    (window.location.hostname === 'localhost' && typeof (window as any).Capacitor !== 'undefined');
-
-  if (isCapacitorNative) {
-    // If running in APK native webview and no external VITE_API_BASE_URL set,
-    // fallback gracefully to current origin or relative path
-    return path;
-  }
-
-  return path;
-};
 
 // Browser helper for SpeechRecognition compatibility
 const getSpeechRecognitionClass = (): any => {

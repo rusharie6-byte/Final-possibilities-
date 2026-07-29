@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Sparkles, Cpu, Network, Zap, Send, RefreshCw, Layers } from 'lucide-react';
 import { BrainNode } from '../types';
 import { audioSynth } from '../utils/audioSynthesizer';
+import { getApiEndpoint } from '../lib/api';
 
 const INITIAL_NODES: BrainNode[] = [
   { id: '1', label: 'Core Self-Model', category: 'core', valency: 0.95, x: 0, y: 0, connections: ['2', '3', '4', '5'], isActive: true },
@@ -45,7 +46,8 @@ export const BrainView: React.FC = () => {
     audioSynth.playOrbPulse(300, 0.4);
 
     try {
-      const res = await fetch('/api/gemini', {
+      const apiUrl = getApiEndpoint('/api/gemini');
+      const res = await fetch(apiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
