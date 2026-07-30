@@ -1,14 +1,37 @@
 apply plugin: 'com.android.application'
 
+def computeVersionCode() {
+    def runNum = System.getenv("GITHUB_RUN_NUMBER")
+    if (runNum != null && runNum.isInteger() && runNum.toInteger() > 0) {
+        return 1000 + runNum.toInteger()
+    }
+    def buildNum = System.getenv("BUILD_NUMBER")
+    if (buildNum != null && buildNum.isInteger() && buildNum.toInteger() > 0) {
+        return 1000 + buildNum.toInteger()
+    }
+    // High base version code ensuring strict incremental upgrades over previous versions 1 & 2
+    return 100
+}
+
 android {
     namespace = "com.possibilities.app"
     compileSdk = rootProject.ext.compileSdkVersion
+
+    signingConfigs {
+        debug {
+            storeFile file('debug.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+    }
+
     defaultConfig {
         applicationId "com.possibilities.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 2
-        versionName "1.1"
+        versionCode computeVersionCode()
+        versionName "1.2"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -21,7 +44,11 @@ android {
         targetCompatibility JavaVersion.VERSION_21
     }
     buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+        }
         release {
+            signingConfig signingConfigs.debug
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
