@@ -26,6 +26,44 @@ export interface MissionItem {
   subtasks: { id: string; text: string; done: boolean }[];
 }
 
+export interface PartnerProfile {
+  personality: string;
+  communicationStyle: string;
+  preferences: string[];
+  values: string[];
+  habits: string[];
+  longTermGoals: string[];
+  relationships: string[];
+  responsePreferences: string;
+  lastReflectedAt: string;
+}
+
+export interface LivingContext {
+  currentFocus: string;
+  currentProjects: string[];
+  currentStruggles: string[];
+  currentPriorities: string[];
+  currentEmotions: string[];
+  activeConversations: string[];
+  shortTermReminders: { id: string; text: string; createdAt: string }[];
+  updatedAt: string;
+}
+
+export interface CoreMemoryItem {
+  id: string;
+  text: string;
+  category: 'Name' | 'Family' | 'Life Event' | 'Permanent Preference' | 'Promise' | 'Sacred';
+  createdAt: string;
+}
+
+export interface ReflectionLogEntry {
+  id: string;
+  timestamp: string;
+  learnedNew: boolean;
+  insightSummary?: string;
+  updatedDocument?: 'Partner Profile' | 'Living Context' | 'None';
+}
+
 export interface MemoryItem {
   id: string;
   title: string;

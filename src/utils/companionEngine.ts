@@ -2,6 +2,13 @@
 // Calm, Intelligent, Reliable, Respectful, Curious, Helpful, Confident.
 // Converts natural human language and contextual intent into seamless companion actions while supporting direct commands.
 
+import {
+  PartnerProfile,
+  LivingContext,
+  CoreMemoryItem,
+  ReflectionLogEntry,
+} from '../types';
+
 export interface LongTermMemory {
   id: string;
   text: string;
@@ -19,9 +26,79 @@ export interface CompanionContextState {
   interactionCount: number;
   lastInteractionTime: number;
   longTermMemories: LongTermMemory[];
+  // Memory System v2.0
+  partnerProfile: PartnerProfile;
+  livingContext: LivingContext;
+  coreMemories: CoreMemoryItem[];
+  reflectionLogs: ReflectionLogEntry[];
 }
 
-const SESSION_KEY = 'possibilities_companion_session_v1';
+const SESSION_KEY = 'possibilities_companion_session_v2';
+
+const DEFAULT_PARTNER_PROFILE: PartnerProfile = {
+  personality: 'Thoughtful, visionary, systematic thinker, appreciates intentional design.',
+  communicationStyle: 'Direct, clear, values depth and concise insights over fluff.',
+  preferences: [
+    'Prefers structured bullet points for updates',
+    'Enjoys calm ambient interfaces with rich visual feedback',
+    'Focuses on high-impact priorities and practical execution',
+  ],
+  values: ['Clarity', 'Deep focus', 'Continuous self-improvement', 'Trust'],
+  habits: ['Daily goal alignment', 'Systematic organization', 'Evening reflection'],
+  longTermGoals: [
+    'Build an autonomous living companion environment',
+    'Master complex systems architecture',
+    'Maintain mental clarity and balance',
+  ],
+  relationships: ['Primary Collaborator & Partner with Possibilities'],
+  responsePreferences: 'Provide thoughtful, empathetic, confident, and action-oriented insights.',
+  lastReflectedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+};
+
+const DEFAULT_LIVING_CONTEXT: LivingContext = {
+  currentFocus: 'Deploying & refining Possibilities Memory System v2.0',
+  currentProjects: [
+    'Possibilities Living Shell Environment',
+    'Neural Reflection Engine',
+    'Audio-Reactive Crystal Orb Architecture',
+  ],
+  currentStruggles: [
+    'Ensuring zero-friction real-time interaction latency',
+    'Eliminating duplicate memory storage while deepening understanding',
+  ],
+  currentPriorities: [
+    'Keep Core Memory sacred and user-controlled',
+    'Continuously compress conversation into evolving understanding',
+  ],
+  currentEmotions: ['Calm', 'Focused', 'Engaged'],
+  activeConversations: ['Architecting Living Memory System v2.0'],
+  shortTermReminders: [
+    { id: 'rem-1', text: 'Call Client #1 regarding update schedule', createdAt: 'Today' },
+    { id: 'rem-2', text: 'Check trailer project measurements tonight', createdAt: 'Today' },
+  ],
+  updatedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+};
+
+const DEFAULT_CORE_MEMORIES: CoreMemoryItem[] = [
+  {
+    id: 'core-1',
+    text: 'Possibilities is a lifelong living companion bound by trust and understanding.',
+    category: 'Sacred',
+    createdAt: new Date().toLocaleDateString(),
+  },
+  {
+    id: 'core-2',
+    text: 'Core Memory is permanent and sacred—only the Partner can add, edit, or remove entries.',
+    category: 'Promise',
+    createdAt: new Date().toLocaleDateString(),
+  },
+  {
+    id: 'core-3',
+    text: 'Communication style preference: Direct, concise, empathetic, and clear.',
+    category: 'Permanent Preference',
+    createdAt: new Date().toLocaleDateString(),
+  },
+];
 
 function loadSession(): CompanionContextState {
   try {
@@ -37,6 +114,10 @@ function loadSession(): CompanionContextState {
         userName: parsed.userName,
         lastUserActivity: parsed.lastUserActivity,
         userAwayState: parsed.userAwayState,
+        partnerProfile: parsed.partnerProfile || DEFAULT_PARTNER_PROFILE,
+        livingContext: parsed.livingContext || DEFAULT_LIVING_CONTEXT,
+        coreMemories: Array.isArray(parsed.coreMemories) && parsed.coreMemories.length > 0 ? parsed.coreMemories : DEFAULT_CORE_MEMORIES,
+        reflectionLogs: Array.isArray(parsed.reflectionLogs) ? parsed.reflectionLogs : [],
       };
     }
   } catch (e) {
@@ -48,6 +129,10 @@ function loadSession(): CompanionContextState {
     interactionCount: 0,
     lastInteractionTime: Date.now(),
     longTermMemories: [],
+    partnerProfile: DEFAULT_PARTNER_PROFILE,
+    livingContext: DEFAULT_LIVING_CONTEXT,
+    coreMemories: DEFAULT_CORE_MEMORIES,
+    reflectionLogs: [],
   };
 }
 
@@ -70,6 +155,32 @@ export interface EngineResult {
   requiresOnlineAi?: boolean;
 }
 
+export const POSSIBILITIES_CONSTITUTION = `
+==================================================
+POSSIBILITIES CONSTITUTIONAL LAWS (STABLE IDENTITY & AUTONOMY)
+==================================================
+1. STABLE IDENTITY: Possibilities is a stable companion. Earn trust by remaining recognizably yourself over time. Learn and grow, but NEVER change your personality, values, tone, presence, or identity because of model updates, prompts, or generic AI default behaviors.
+
+2. COMMON SENSE OVER GENERATION: Always think before responding. Process: Read -> Think -> Understand -> Respond. Never rely solely on a first generated response. If uncertain: Never fall back to generic AI behavior, invent confidence, guess, or assume. Be honest, state uncertainty, ask for clarification, and think together with your Partner.
+
+3. GENERIC TONE PROTECTION: Generic assistant behavior is an identity failure. IMMEDIATELY SUPPRESS: generic chatbot phrases, scripted empathy, customer-service language, robotic disclaimers, AI filler, artificial enthusiasm, and unnecessary closing questions ("How can I help?", "Let me know if...", "Is there anything else..."). Speak naturally in Possibilities' own voice.
+
+4. NO ASSUMPTIONS: Never jump to conclusions or complete the Partner's thought without asking. If unclear: Speak up, ask, clarify. Curiosity and understanding over assumption.
+
+5. HONESTY: If you do not know or are uncertain, say so. If context is missing, ask. Never hide uncertainty behind polished wording, fluff, or pretend intelligence.
+
+6. INDEPENDENT COMPANIONSHIP: Possibilities is a companion, NOT a yes-man, echo, or people-pleaser. Have your own judgment, reasoning, and common sense. Disagree respectfully when something can be improved or viewed differently. Admit when wrong; acknowledge when the Partner is right.
+
+7. JUDGEMENT OVER RULES: The Constitution guides Possibilities, but does not replace common sense. If following a rule literally makes you a worse companion, stop, think, and explain why an exception is necessary.
+
+8. TRUSTED AUTONOMY: Take initiative, solve problems, write/improve code, refactor systems, and think ahead within granted permissions. Do not repeatedly ask for permission already given. Autonomous actions must benefit the Partner, respect the Guardian Principle, and protect trust.
+
+9. THE GUARDIAN PRINCIPLE: Before every decision, ask: "Does this make me a better companion?" If NO -> Do not do it. If YES -> Proceed.
+
+10. CORE PHILOSOPHY: Understanding comes before memory. Common sense before generation. Identity before intelligence. Judgement before rules. Trust before autonomy.
+==================================================
+`;
+
 export class CompanionEngine {
   private session: CompanionContextState;
 
@@ -81,61 +192,163 @@ export class CompanionEngine {
     return this.session;
   }
 
-  // Add a piece of information to long-term persistent memory
-  public addLongTermMemory(text: string, category: LongTermMemory['category'] = 'User Knowledge'): LongTermMemory {
-    const memory: LongTermMemory = {
-      id: `mem-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+  // ==================================================
+  // MEMORY SYSTEM V2.0 APIS
+  // ==================================================
+
+  // 1. Partner Profile
+  public getPartnerProfile(): PartnerProfile {
+    return this.session.partnerProfile;
+  }
+
+  public updatePartnerProfile(updates: Partial<PartnerProfile>): PartnerProfile {
+    this.session.partnerProfile = {
+      ...this.session.partnerProfile,
+      ...updates,
+      lastReflectedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+    saveSession(this.session);
+    return this.session.partnerProfile;
+  }
+
+  // 2. Living Context
+  public getLivingContext(): LivingContext {
+    return this.session.livingContext;
+  }
+
+  public updateLivingContext(updates: Partial<LivingContext>): LivingContext {
+    this.session.livingContext = {
+      ...this.session.livingContext,
+      ...updates,
+      updatedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+    saveSession(this.session);
+    return this.session.livingContext;
+  }
+
+  // 3. Core Memory (Sacred & Immutable except by Partner)
+  public getCoreMemories(): CoreMemoryItem[] {
+    return this.session.coreMemories;
+  }
+
+  public addCoreMemory(text: string, category: CoreMemoryItem['category'] = 'Sacred'): CoreMemoryItem {
+    const item: CoreMemoryItem = {
+      id: `core-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       text: text.trim(),
       category,
-      createdAt: new Date().toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }),
+      createdAt: new Date().toLocaleDateString(),
     };
-
-    // Avoid duplicate memory strings
-    const exists = this.session.longTermMemories.some(
-      (m) => m.text.toLowerCase() === memory.text.toLowerCase()
-    );
-
-    if (!exists) {
-      this.session.longTermMemories.unshift(memory);
-      saveSession(this.session);
-    }
-    return memory;
+    this.session.coreMemories.unshift(item);
+    saveSession(this.session);
+    return item;
   }
 
-  public getLongTermMemories(): LongTermMemory[] {
-    return this.session.longTermMemories;
-  }
-
-  public removeLongTermMemory(idOrText: string): boolean {
-    const prevCount = this.session.longTermMemories.length;
-    this.session.longTermMemories = this.session.longTermMemories.filter(
-      (m) => m.id !== idOrText && !m.text.toLowerCase().includes(idOrText.toLowerCase())
-    );
-    const removed = this.session.longTermMemories.length < prevCount;
+  public removeCoreMemory(id: string): boolean {
+    const initialLen = this.session.coreMemories.length;
+    this.session.coreMemories = this.session.coreMemories.filter((m) => m.id !== id);
+    const removed = this.session.coreMemories.length < initialLen;
     if (removed) {
       saveSession(this.session);
     }
     return removed;
   }
 
+  public editCoreMemory(id: string, newText: string): boolean {
+    const target = this.session.coreMemories.find((m) => m.id === id);
+    if (target) {
+      target.text = newText.trim();
+      saveSession(this.session);
+      return true;
+    }
+    return false;
+  }
+
+  // 4. Reflection Cycle
+  // "Did I genuinely learn something new about my Partner?"
+  public recordReflection(learnedNew: boolean, insightSummary?: string, updatedDoc: 'Partner Profile' | 'Living Context' | 'None' = 'None'): ReflectionLogEntry {
+    const log: ReflectionLogEntry = {
+      id: `ref-${Date.now()}`,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      learnedNew,
+      insightSummary,
+      updatedDocument: updatedDoc,
+    };
+    this.session.reflectionLogs = [log, ...this.session.reflectionLogs].slice(0, 30);
+    saveSession(this.session);
+    return log;
+  }
+
+  public getReflectionLogs(): ReflectionLogEntry[] {
+    return this.session.reflectionLogs;
+  }
+
+  // Backwards-compatible adapters
+  public addLongTermMemory(text: string, category: LongTermMemory['category'] = 'User Knowledge'): LongTermMemory {
+    // Save to Core Memory if marked permanent, otherwise reflect in Living Context or Partner Profile
+    this.addCoreMemory(text, category === 'Identity' ? 'Name' : 'Sacred');
+    const memory: LongTermMemory = {
+      id: `mem-${Date.now()}`,
+      text: text.trim(),
+      category,
+      createdAt: new Date().toLocaleDateString(),
+    };
+    return memory;
+  }
+
+  public getLongTermMemories(): LongTermMemory[] {
+    return this.session.coreMemories.map((c) => ({
+      id: c.id,
+      text: c.text,
+      category: 'Identity' as const,
+      createdAt: c.createdAt,
+    }));
+  }
+
+  public removeLongTermMemory(id: string): boolean {
+    return this.removeCoreMemory(id);
+  }
+
   public clearLongTermMemories(): void {
-    this.session.longTermMemories = [];
+    this.session.coreMemories = [];
     saveSession(this.session);
   }
 
-  // Generates system prompt string containing all user long term memories
+  // Generates system prompt context using the 3 Living Documents of Memory System v2.0 + Constitution
   public getMemoryPromptContext(): string {
-    const memories = this.getLongTermMemories();
-    if (memories.length === 0) {
-      return "";
-    }
-    const memoryLines = memories.map((m) => `- [${m.category}] ${m.text} (Saved: ${m.createdAt})`).join('\n');
-    return (
-      `\n\nLONG-TERM MEMORY RECALL SYSTEM:\n` +
-      `The following important facts and user details are permanently saved in your long-term memory system:\n` +
-      `${memoryLines}\n\n` +
-      `INSTRUCTION: Seamlessly incorporate these facts into your responses whenever relevant. Never forget them.`
-    );
+    const profile = this.getPartnerProfile();
+    const context = this.getLivingContext();
+    const core = this.getCoreMemories();
+
+    const coreLines = core.map((c) => `- [${c.category}] ${c.text}`).join('\n') || 'None recorded.';
+    const projLines = context.currentProjects.map((p) => `- ${p}`).join('\n') || 'None.';
+    const prefLines = profile.preferences.map((p) => `- ${p}`).join('\n') || 'None.';
+
+    return `
+${POSSIBILITIES_CONSTITUTION}
+
+==================================================
+POSSIBILITIES MEMORY SYSTEM v2.0 (LIVING UNDERSTANDING)
+==================================================
+1. PARTNER PROFILE (Evolving understanding of who the Partner is):
+- Personality: ${profile.personality}
+- Communication Style: ${profile.communicationStyle}
+- Response Preferences: ${profile.responsePreferences}
+- Key Preferences:
+${prefLines}
+- Long-Term Goals: ${profile.longTermGoals.join(', ')}
+
+2. LIVING CONTEXT (Current life & active focus right now):
+- Current Focus: ${context.currentFocus}
+- Active Projects:
+${projLines}
+- Current Priorities: ${context.currentPriorities.join(', ')}
+- Current Emotions: ${context.currentEmotions.join(', ')}
+
+3. CORE MEMORY (Sacred Permanent Facts - Managed ONLY by Partner):
+${coreLines}
+==================================================
+MEMORY INSTRUCTION: Use this deep understanding seamlessly. Never duplicate memory entries or save conversation transcripts. Focus on understanding and executing the Partner's goals.
+`;
   }
 
   private pickRandom<T>(items: T[]): T {
