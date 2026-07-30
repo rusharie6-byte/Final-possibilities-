@@ -2,7 +2,7 @@ import { Capacitor } from '@capacitor/core';
 
 // Canonical deployed Cloud Run backend service URL for native APK environment
 const DEFAULT_DEPLOYED_BACKEND_URL =
-  'https://ais-pre-xki5itro4qvkulz7ttotff-584621251809.europe-west2.run.app';
+  'https://possibilities-shell.ai.studio';
 
 /**
  * Detects whether the application is executing inside a Capacitor Native App (Android/iOS)

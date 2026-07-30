@@ -7,7 +7,7 @@ export default defineConfig(() => {
   const backendUrl =
     process.env.VITE_BACKEND_URL ||
     process.env.APP_URL ||
-    'https://ais-pre-xki5itro4qvkulz7ttotff-584621251809.europe-west2.run.app';
+    'https://possibilities-shell.ai.studio';
 
   return {
     plugins: [react(), tailwindcss()],
