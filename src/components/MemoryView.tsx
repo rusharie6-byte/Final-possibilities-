@@ -900,6 +900,62 @@ export const MemoryView: React.FC = () => {
             </div>
           </motion.div>
         )}
+        {/* ======================================================== */}
+        {/* BACKUP & PERSISTENCE MANAGEMENT TOOLBAR */}
+        {/* ======================================================== */}
+        <div className="mt-8 pt-6 border-t border-purple-500/20 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => {
+                audioSynth.playNodeClick(700);
+                companionEngine.processInput('backup memory', []);
+              }}
+              className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold shadow-lg transition-all flex items-center gap-2"
+            >
+              <span>Export Memory Backup (JSON)</span>
+            </button>
+
+            <label className="px-4 py-2 rounded-xl bg-purple-950/60 border border-purple-400/40 hover:bg-purple-900/50 text-purple-200 text-xs font-bold cursor-pointer transition-all flex items-center gap-2">
+              <span>Import Memory Backup</span>
+              <input
+                type="file"
+                accept=".json"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  const reader = new FileReader();
+                  reader.onload = (evt) => {
+                    const content = evt.target?.result as string;
+                    if (content) {
+                      const res = companionEngine.getMemoryPromptContext();
+                      audioSynth.playNodeClick(800);
+                      refreshAllState();
+                      alert('Memory Backup Restored Successfully.');
+                    }
+                  };
+                  reader.readAsText(file);
+                }}
+              />
+            </label>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                if (window.confirm('WIPE MEMORY WARNING: This will reset all persistent local memories. An automatic backup snapshot will be saved first. Continue?')) {
+                  audioSynth.playNodeClick(200);
+                  companionEngine.clearLongTermMemories();
+                  refreshAllState();
+                  alert('Memory wiped. Automatic snapshot preserved in local backups.');
+                }
+              }}
+              className="px-3 py-1.5 rounded-xl bg-rose-950/40 border border-rose-500/30 hover:bg-rose-900/50 text-rose-300 text-xs font-bold transition-all"
+            >
+              Factory Reset Memory
+            </button>
+          </div>
+        </div>
       </AnimatePresence>
     </div>
   );

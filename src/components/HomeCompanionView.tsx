@@ -234,16 +234,10 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
     };
   }, []);
 
-  // Clear chat history handler
+  // Clear chat history handler (Clears visible chat screen ONLY - long-term memory remains intact)
   const handleClearChatHistory = useCallback(() => {
     audioSynth.playNodeClick(400);
-    const resetMsg: ChatMsg = {
-      id: `reset-${Date.now()}`,
-      sender: 'possibilities',
-      text: "Conversation history cleared. Possibilities is ready for new thoughts.",
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    };
-    setMessages([resetMsg]);
+    setMessages([]);
     try {
       localStorage.removeItem(CHAT_HISTORY_STORAGE_KEY);
     } catch (e) {
