@@ -286,6 +286,31 @@ MEMORY INSTRUCTION:
     temporalEngine.recordMessageSent();
 
     // Fast exact commands
+    if (query.includes('"action": "propose_memory_write"') || query.includes('propose_memory_write')) {
+      try {
+        const jsonMatch = input.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          if (parsed.action === 'propose_memory_write' && parsed.payload) {
+            const prop = approvalEngine.proposeMemoryWrite(
+              parsed.payload.targetLayer || 'core',
+              parsed.payload.key || 'MemoryEntry',
+              parsed.payload.value || '',
+              parsed.payload.justification || 'Companion reasoned memory proposal',
+              'creator_statement',
+              parsed.payload.durationMs
+            );
+            return {
+              text: `Memory write proposed successfully.\n- Proposal ID: ${prop.proposalId}\n- Layer: ${prop.targetLayer}\n- Key: ${prop.key}\n- Value: ${prop.value}\nStatus: PENDING_APPROVAL. Creator Arno/Arie approval is required before MemoryStore commit.`,
+              action: { type: 'navigate', target: 'memory' },
+            };
+          }
+        }
+      } catch (e) {
+        // Fallback to text parsing
+      }
+    }
+
     if (query === 'open memory' || query === 'show memory' || query === 'memories') {
       return { text: "Accessing memory constellations.", action: { type: 'navigate', target: 'memory' } };
     }

@@ -29,8 +29,9 @@ import {
 } from '../types';
 import { audioSynth } from '../utils/audioSynthesizer';
 import { companionEngine } from '../utils/companionEngine';
+import { approvalEngine } from '../utils/approvalEngine';
 
-type ActiveTab = 'profile' | 'context' | 'core' | 'reflection';
+type ActiveTab = 'profile' | 'context' | 'core' | 'reflection' | 'proposals';
 
 export const MemoryView: React.FC = () => {
   const [activeTab, setActiveTab] = useState<ActiveTab>('profile');
@@ -38,6 +39,11 @@ export const MemoryView: React.FC = () => {
   const [context, setContext] = useState<LivingContext>(companionEngine.getLivingContext());
   const [coreMemories, setCoreMemories] = useState<CoreMemoryItem[]>(companionEngine.getCoreMemories());
   const [reflectionLogs, setReflectionLogs] = useState<ReflectionLogEntry[]>(companionEngine.getReflectionLogs());
+
+  // Proposals & Receipts
+  const [memoryProposals, setMemoryProposals] = useState(approvalEngine.getAllMemoryWriteProposals());
+  const [codeProposals, setCodeProposals] = useState(approvalEngine.getAllProposals());
+  const [receipts, setReceipts] = useState(approvalEngine.getCommitReceipts());
 
   // Form states for Core Memory
   const [isAddingCore, setIsAddingCore] = useState(false);
@@ -62,6 +68,9 @@ export const MemoryView: React.FC = () => {
     setContext({ ...companionEngine.getLivingContext() });
     setCoreMemories([...companionEngine.getCoreMemories()]);
     setReflectionLogs([...companionEngine.getReflectionLogs()]);
+    setMemoryProposals([...approvalEngine.getAllMemoryWriteProposals()]);
+    setCodeProposals([...approvalEngine.getAllProposals()]);
+    setReceipts([...approvalEngine.getCommitReceipts()]);
   };
 
   useEffect(() => {
@@ -252,6 +261,21 @@ export const MemoryView: React.FC = () => {
           >
             <RotateCw className="w-3.5 h-3.5" />
             <span>REFLECTION CYCLE</span>
+          </button>
+
+          <button
+            onClick={() => {
+              audioSynth.playNodeClick(580);
+              setActiveTab('proposals');
+            }}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold tracking-wider transition-all flex items-center gap-1.5 whitespace-nowrap ${
+              activeTab === 'proposals'
+                ? 'bg-purple-600 text-white shadow-[0_0_15px_#A855F7]'
+                : 'text-purple-300/70 hover:text-purple-100 hover:bg-purple-950/40'
+            }`}
+          >
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+            <span>APPROVALS & RECEIPTS ({memoryProposals.filter(p => p.status === 'PENDING_APPROVAL').length})</span>
           </button>
         </div>
       </div>
@@ -893,6 +917,121 @@ export const MemoryView: React.FC = () => {
                         </div>
                       </div>
                       <span className="text-[10px] text-purple-400 shrink-0">{log.timestamp}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+
+        {/* ======================================================== */}
+        {/* 5. APPROVALS & COMMIT RECEIPTS TAB */}
+        {/* ======================================================== */}
+        {activeTab === 'proposals' && (
+          <motion.div
+            key="tab-proposals"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="flex flex-col gap-6"
+          >
+            {/* Header Banner */}
+            <div className="p-4 rounded-2xl bg-purple-950/30 border border-purple-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 backdrop-blur-md">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-xl bg-purple-900/60 flex items-center justify-center border border-purple-400/40 shrink-0">
+                  <ShieldCheck className="w-4 h-4 text-emerald-300" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-white tracking-wide">5. CREATOR APPROVAL ENGINE & COMMIT RECEIPTS</h2>
+                  <p className="text-xs text-purple-300/70">
+                    No state-changing memory or code modification happens without Creator Arno/Arie approval.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Pending Memory Proposals */}
+            <div className="p-4 rounded-2xl bg-black border border-purple-500/30 flex flex-col gap-3">
+              <h3 className="text-xs font-bold text-emerald-300 font-mono tracking-wider flex items-center justify-between">
+                <span>PENDING MEMORY WRITE PROPOSALS ({memoryProposals.filter((p) => p.status === 'PENDING_APPROVAL').length})</span>
+              </h3>
+
+              {memoryProposals.filter((p) => p.status === 'PENDING_APPROVAL').length === 0 ? (
+                <div className="p-4 text-center text-xs text-purple-400/60 font-mono">
+                  No pending memory write proposals awaiting Creator approval.
+                </div>
+              ) : (
+                memoryProposals
+                  .filter((p) => p.status === 'PENDING_APPROVAL')
+                  .map((prop) => (
+                    <div key={prop.proposalId} className="p-4 rounded-xl bg-purple-950/30 border border-purple-500/40 flex flex-col gap-2 font-mono">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-amber-300">PROPOSAL ID: {prop.proposalId}</span>
+                        <span className="text-[10px] px-2 py-0.5 rounded bg-purple-900 text-purple-200 uppercase">{prop.targetLayer}</span>
+                      </div>
+                      <div className="text-xs text-white">
+                        <span className="text-purple-400">Key/Topic:</span> {prop.key}
+                      </div>
+                      <div className="text-xs text-emerald-300 bg-black/60 p-2.5 rounded border border-purple-500/20 font-sans">
+                        "{prop.value}"
+                      </div>
+                      <div className="text-[11px] text-purple-300/80 italic">
+                        Justification: {prop.justification}
+                      </div>
+                      <div className="flex items-center justify-end gap-2 pt-2 border-t border-purple-500/20">
+                        <button
+                          onClick={() => {
+                            audioSynth.playNodeClick(300);
+                            approvalEngine.rejectMemoryWrite(prop.proposalId);
+                            refreshAllState();
+                          }}
+                          className="px-3 py-1 bg-rose-950 border border-rose-500/40 text-rose-300 hover:bg-rose-900 text-xs font-bold rounded-lg"
+                        >
+                          Reject
+                        </button>
+                        <button
+                          onClick={() => {
+                            audioSynth.playNodeClick(700);
+                            approvalEngine.approveMemoryWrite(prop.proposalId);
+                            refreshAllState();
+                          }}
+                          className="px-4 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg shadow-md"
+                        >
+                          Approve & Commit
+                        </button>
+                      </div>
+                    </div>
+                  ))
+              )}
+            </div>
+
+            {/* Commit Receipts History */}
+            <div className="p-4 rounded-2xl bg-black border border-purple-500/30 flex flex-col gap-3">
+              <h3 className="text-xs font-bold text-purple-300 font-mono tracking-wider flex items-center justify-between">
+                <span>VERIFIABLE COMMIT RECEIPTS ({receipts.length})</span>
+              </h3>
+
+              {receipts.length === 0 ? (
+                <div className="p-4 text-center text-xs text-purple-400/60 font-mono">
+                  No commit receipts generated yet.
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-80 overflow-y-auto custom-scrollbar">
+                  {receipts.map((rc) => (
+                    <div key={rc.recordId + rc.timestamp} className="p-3 rounded-xl bg-purple-950/20 border border-purple-500/20 text-xs font-mono flex flex-col gap-1">
+                      <div className="flex items-center justify-between">
+                        <span className={`font-bold ${rc.status === 'SUCCESS' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          [{rc.status}] {rc.operation.toUpperCase()}
+                        </span>
+                        <span className="text-[10px] text-purple-400">{rc.timestamp}</span>
+                      </div>
+                      <div className="text-[11px] text-purple-200/90">{rc.message}</div>
+                      <div className="text-[10px] text-purple-400 flex items-center gap-3 pt-1 border-t border-purple-500/10">
+                        <span>Write: {rc.verification.writeConfirmed ? '✓ CONFIRMED' : '✗ FAILED'}</span>
+                        <span>ReadBack: {rc.verification.readBackConfirmed ? '✓ CONFIRMED' : '✗ FAILED'}</span>
+                        <span>Reload: {rc.verification.contextReloadConfirmed ? '✓ CONFIRMED' : '✗ FAILED'}</span>
+                      </div>
                     </div>
                   ))}
                 </div>

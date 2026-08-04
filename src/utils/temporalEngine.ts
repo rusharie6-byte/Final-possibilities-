@@ -81,6 +81,21 @@ export class TemporalEngine {
     return this.currentSession;
   }
 
+  public startNewSession(): SessionMetadata {
+    const nowIso = new Date().toISOString();
+    this.lastSession = { ...this.currentSession, endedAt: nowIso };
+    this.currentSession = {
+      sessionId: `session-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      startedAt: nowIso,
+      lastActiveAt: nowIso,
+      lastMessageAt: nowIso,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+      appLaunchAt: nowIso,
+    };
+    this.persistCurrentSession();
+    return this.currentSession;
+  }
+
   public getLastSession(): SessionMetadata | undefined {
     return this.lastSession;
   }

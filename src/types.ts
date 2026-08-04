@@ -94,6 +94,49 @@ export interface ChatMessage {
   isStreaming?: boolean;
 }
 
+export interface CommitReceipt {
+  recordId: string;
+  operationId: string;
+  operation: 'memory_write' | 'code_patch' | 'schema_update' | 'presence_rule' | 'rollback';
+  status: 'SUCCESS' | 'REJECTED' | 'FAILED';
+  timestamp: string; // ISO UTC
+  targetLayer?: 'core' | 'living_context' | 'episodic' | 'temporary' | 'presence_rule';
+  keyOrCategory?: string;
+  value?: string;
+  provenance: string;
+  verification: {
+    writeConfirmed: boolean;
+    readBackConfirmed: boolean;
+    contextReloadConfirmed: boolean;
+  };
+  message: string;
+}
+
+export interface MemoryWriteProposal {
+  proposalId: string;
+  createdAt: string;
+  targetLayer: 'core' | 'living_context' | 'episodic' | 'temporary' | 'presence_rule';
+  key: string;
+  value: string;
+  justification: string;
+  source: string;
+  durationMs?: number;
+  status: 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'APPLIED' | 'FAILED';
+  receipt?: CommitReceipt;
+}
+
+export interface ConversationBackup {
+  version: string;
+  exportedAt: string;
+  sessionId: string;
+  messageCount: number;
+  messages: ChatMessage[];
+  metadata: {
+    creator: string;
+    preferredAddress: string;
+  };
+}
+
 export interface SystemDiagnostics {
   fps: number;
   coreTemperature: string;
