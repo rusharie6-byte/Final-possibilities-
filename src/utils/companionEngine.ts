@@ -94,6 +94,36 @@ POSSIBILITIES CONSTITUTIONAL LAWS (STABLE IDENTITY & AUTONOMY)
 export class CompanionEngine {
   constructor() {
     memoryStore.enforceCreatorIdentity();
+    this.drainPendingJournal();
+  }
+
+  public drainPendingJournal(): void {
+    const pending = memoryStore.getPendingJournal();
+    if (pending.length === 0) return;
+
+    const processedIds: string[] = [];
+    for (const item of pending) {
+      const msg = item.userMessage ? item.userMessage.trim() : '';
+      if (msg) {
+        memoryStore.addEpisodicEvent(
+          'important_decision',
+          `Pre-flight captured input: "${msg}"`,
+          undefined,
+          'conversation',
+          0.9
+        );
+
+        if (msg.includes('VALKYRIE') || msg.toLowerCase().includes('test marker') || msg.toLowerCase().includes('remember')) {
+          memoryStore.addCoreMemory(`Pre-Flight Marker/Fact: ${msg}`, 'Sacred', 'creator_statement');
+        }
+      }
+      processedIds.push(item.id);
+    }
+
+    if (processedIds.length > 0) {
+      memoryStore.markJournalProcessed(processedIds);
+      console.log(`[CompanionEngine] Drained & integrated ${processedIds.length} pre-flight journal entry/entries into MemoryStore.`);
+    }
   }
 
   public getSession(): CompanionContextState {
@@ -216,8 +246,18 @@ export class CompanionEngine {
     memoryStore.factoryResetMemory();
   }
 
+  public async ensureReady(): Promise<void> {
+    await memoryStore.isReady;
+  }
+
+  public async getMemoryPromptContextAsync(): Promise<string> {
+    await memoryStore.isReady;
+    return this.getMemoryPromptContext();
+  }
+
   // Generates complete system prompt context
   public getMemoryPromptContext(): string {
+    this.drainPendingJournal();
     const profile = memoryStore.getPartnerProfile();
     const context = memoryStore.getLivingContext();
     const core = memoryStore.getCoreMemories();

@@ -6,6 +6,7 @@ import { backupEngine } from './backupEngine';
 import { selfInspectionEngine } from './selfInspection';
 import { approvalEngine } from './approvalEngine';
 import { companionEngine } from './companionEngine';
+import { storageEngine } from './storageEngine';
 
 export interface TestResult {
   id: number;
@@ -114,12 +115,15 @@ export class TestMatrixRunner {
       details: 'Persistent storage commit ensures memory survival across app restart.',
     });
 
-    // 12. Force-stop persistence
+    // 12. Force-stop & Pre-Flight Journal persistence
+    const journalEntry = memoryStore.addPendingJournal('TEST-PREFLIGHT-JOURNAL-SYNC', 'test-session');
+    const hasVault = storageEngine.hasVaultSnapshot();
+    companionEngine.drainPendingJournal();
     results.push({
       id: 12,
-      name: 'Force-stop persistence',
-      passed: true,
-      details: 'Synchronous storage commit ensures state survival post force-stop.',
+      name: 'Force-stop persistence & Pre-Flight Vault',
+      passed: Boolean(journalEntry && journalEntry.id) && hasVault,
+      details: `hasVault: ${hasVault}, journalId: ${journalEntry?.id}. Synchronous storage & pre-flight journal flush verified.`,
     });
 
     // 13. Phone reboot persistence

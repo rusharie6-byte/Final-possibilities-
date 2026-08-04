@@ -79,15 +79,61 @@ async function startServer() {
         }
       }
 
-      // Direct call to primary supported model gemini-3.6-flash
+      // Direct call to primary supported model gemini-3.6-flash with Possibilities Tool Schemas
+      const toolDeclarations = [
+        {
+          functionDeclarations: [
+            {
+              name: "propose_core_memory_update",
+              description: "Proposes an update, addition, or removal to Possibilities Core Memory. Requires user approval.",
+              parameters: {
+                type: "OBJECT",
+                properties: {
+                  action: { type: "STRING", enum: ["add", "update", "delete"] },
+                  key: { type: "STRING", description: "The memory key/tag" },
+                  content: { type: "STRING", description: "The exact memory text to store" },
+                  reasoning: { type: "STRING", description: "Why this core memory change is being proposed" }
+                },
+                required: ["action", "key", "content", "reasoning"]
+              }
+            },
+            {
+              name: "propose_file_write",
+              description: "Proposes writing or updating a code/config file in the shell environment. Requires user approval.",
+              parameters: {
+                type: "OBJECT",
+                properties: {
+                  file_path: { type: "STRING", description: "Relative or absolute path to target file" },
+                  content: { type: "STRING", description: "Full file content to write" },
+                  reasoning: { type: "STRING", description: "Purpose of this modification" }
+                },
+                required: ["file_path", "content", "reasoning"]
+              }
+            }
+          ]
+        }
+      ];
+
+      const config: any = {
+        tools: toolDeclarations,
+      };
+      if (systemInstruction) {
+        config.systemInstruction = systemInstruction;
+      }
+
       const response = await ai.models.generateContent({
         model: "gemini-3.6-flash",
         contents: contents,
-        config: systemInstruction ? { systemInstruction } : undefined,
+        config,
       });
 
-      if (response && response.text) {
-        return res.json({ text: response.text });
+      const functionCalls = response.functionCalls || [];
+
+      if ((response && response.text) || functionCalls.length > 0) {
+        return res.json({
+          text: response.text || "",
+          functionCalls,
+        });
       }
 
       throw new Error("No text response received from Gemini model.");

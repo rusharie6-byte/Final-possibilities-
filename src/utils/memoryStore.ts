@@ -2,6 +2,7 @@
 // Manages Partner Profile, Living Context, Core Memory, Episodic Events, Provenance, TTL Expiration, and Conflict Resolution.
 
 import { PartnerProfile, LivingContext, CoreMemoryItem, ReflectionLogEntry } from '../types';
+import { storageEngine, JournalEntry, VaultPayload } from './storageEngine';
 
 export type MemorySource =
   | 'creator_statement'
@@ -167,6 +168,9 @@ export const CREATOR_CORE_MEMORIES_DEFAULT: CoreMemoryItem[] = [
 ];
 
 export class MemoryStore {
+  public isReady: Promise<void>;
+  private resolveReady!: () => void;
+
   private partnerProfile: ExtendedPartnerProfile = CREATOR_PROFILE_DEFAULT;
   private livingContext: LivingContext = CREATOR_LIVING_CONTEXT_DEFAULT;
   private coreMemories: CoreMemoryItem[] = CREATOR_CORE_MEMORIES_DEFAULT;
@@ -175,17 +179,58 @@ export class MemoryStore {
   private temporaryRules: TemporaryMemoryRule[] = [];
   private reflectionLogs: ReflectionLogEntry[] = [];
   private snapshots: MemorySnapshot[] = [];
+  private pendingJournal: JournalEntry[] = [];
 
   constructor() {
+    let resolver: () => void;
+    this.isReady = new Promise<void>((resolve) => {
+      resolver = resolve;
+    });
+    this.resolveReady = resolver!;
+
     this.loadFromStorage();
     this.enforceCreatorIdentity();
     this.cleanExpiredTemporaryMemories();
+    this.initAsync().finally(() => {
+      this.resolveReady();
+    });
+  }
+
+  // Native cold-start rehydration from physical device vault file
+  public async initAsync(): Promise<void> {
+    try {
+      const isDefault = (
+        this.coreMemories.length <= 3 &&
+        this.episodicEvents.length === 0 &&
+        this.provenanceList.length === 0
+      );
+
+      const vault = await storageEngine.readVaultSnapshotAsync();
+      if (vault && vault.memoryData && (isDefault || vault.updatedAt)) {
+        if (vault.memoryData.partnerProfile) this.partnerProfile = { ...CREATOR_PROFILE_DEFAULT, ...vault.memoryData.partnerProfile };
+        if (vault.memoryData.livingContext) this.livingContext = { ...CREATOR_LIVING_CONTEXT_DEFAULT, ...vault.memoryData.livingContext };
+        if (Array.isArray(vault.memoryData.coreMemories) && vault.memoryData.coreMemories.length > 0) this.coreMemories = vault.memoryData.coreMemories;
+        if (Array.isArray(vault.memoryData.episodicEvents)) this.episodicEvents = vault.memoryData.episodicEvents;
+        if (Array.isArray(vault.memoryData.provenanceList)) this.provenanceList = vault.memoryData.provenanceList;
+        if (Array.isArray(vault.memoryData.temporaryRules)) this.temporaryRules = vault.memoryData.temporaryRules;
+        if (Array.isArray(vault.memoryData.reflectionLogs)) this.reflectionLogs = vault.memoryData.reflectionLogs;
+        if (Array.isArray(vault.pendingJournal)) this.pendingJournal = vault.pendingJournal;
+
+        this.enforceCreatorIdentity();
+        console.log('[MemoryStore] Native cold-start rehydration complete from physical disk vault.');
+        this.saveToStorage();
+      }
+    } catch (e) {
+      console.warn('[MemoryStore] Native async rehydration notice:', e);
+    }
   }
 
   private loadFromStorage(): void {
     try {
       if (typeof localStorage === 'undefined') return;
+      let loadedFromLocal = false;
       const raw = localStorage.getItem(STORAGE_KEY_DB);
+      
       if (raw) {
         const parsed = JSON.parse(raw);
         if (parsed.partnerProfile) this.partnerProfile = { ...CREATOR_PROFILE_DEFAULT, ...parsed.partnerProfile };
@@ -195,6 +240,32 @@ export class MemoryStore {
         if (Array.isArray(parsed.provenanceList)) this.provenanceList = parsed.provenanceList;
         if (Array.isArray(parsed.temporaryRules)) this.temporaryRules = parsed.temporaryRules;
         if (Array.isArray(parsed.reflectionLogs)) this.reflectionLogs = parsed.reflectionLogs;
+        if (Array.isArray(parsed.pendingJournal)) this.pendingJournal = parsed.pendingJournal;
+        loadedFromLocal = true;
+      }
+
+      // Check if local storage is missing or default. If default/missing, auto-hydrate from persistent vault file:
+      const isDefault = !loadedFromLocal || (
+        this.coreMemories.length <= 3 &&
+        this.episodicEvents.length === 0 &&
+        this.provenanceList.length === 0
+      );
+
+      if (isDefault && storageEngine.hasVaultSnapshot()) {
+        const vault = storageEngine.readVaultSnapshot();
+        if (vault && vault.memoryData) {
+          if (vault.memoryData.partnerProfile) this.partnerProfile = { ...CREATOR_PROFILE_DEFAULT, ...vault.memoryData.partnerProfile };
+          if (vault.memoryData.livingContext) this.livingContext = { ...CREATOR_LIVING_CONTEXT_DEFAULT, ...vault.memoryData.livingContext };
+          if (Array.isArray(vault.memoryData.coreMemories) && vault.memoryData.coreMemories.length > 0) this.coreMemories = vault.memoryData.coreMemories;
+          if (Array.isArray(vault.memoryData.episodicEvents)) this.episodicEvents = vault.memoryData.episodicEvents;
+          if (Array.isArray(vault.memoryData.provenanceList)) this.provenanceList = vault.memoryData.provenanceList;
+          if (Array.isArray(vault.memoryData.temporaryRules)) this.temporaryRules = vault.memoryData.temporaryRules;
+          if (Array.isArray(vault.memoryData.reflectionLogs)) this.reflectionLogs = vault.memoryData.reflectionLogs;
+          if (Array.isArray(vault.pendingJournal)) this.pendingJournal = vault.pendingJournal;
+
+          console.log('[MemoryStore] Successfully auto-hydrated state from persistent vault snapshot: Documents/Possibilities/possibilities_vault.json');
+          this.saveToStorage();
+        }
       }
 
       const rawSnapshots = localStorage.getItem(STORAGE_KEY_SNAPSHOTS);
@@ -208,7 +279,6 @@ export class MemoryStore {
 
   public saveToStorage(): void {
     try {
-      if (typeof localStorage === 'undefined') return;
       const data = {
         partnerProfile: this.partnerProfile,
         livingContext: this.livingContext,
@@ -217,12 +287,71 @@ export class MemoryStore {
         provenanceList: this.provenanceList,
         temporaryRules: this.temporaryRules,
         reflectionLogs: this.reflectionLogs,
+        pendingJournal: this.pendingJournal,
       };
-      localStorage.setItem(STORAGE_KEY_DB, JSON.stringify(data));
-      localStorage.setItem(STORAGE_KEY_SNAPSHOTS, JSON.stringify(this.snapshots.slice(0, 10)));
+
+      if (typeof localStorage !== 'undefined' && localStorage) {
+        localStorage.setItem(STORAGE_KEY_DB, JSON.stringify(data));
+        localStorage.setItem(STORAGE_KEY_SNAPSHOTS, JSON.stringify(this.snapshots.slice(0, 10)));
+      }
+
+      // Flush encrypted snapshot to public device vault Documents/Possibilities/possibilities_vault.json
+      storageEngine.saveVaultSnapshot({
+        version: '3.0',
+        updatedAt: new Date().toISOString(),
+        filePath: 'Documents/Possibilities/possibilities_vault.json',
+        pendingJournal: this.pendingJournal,
+        memoryData: {
+          partnerProfile: this.partnerProfile,
+          livingContext: this.livingContext,
+          coreMemories: this.coreMemories,
+          episodicEvents: this.episodicEvents,
+          provenanceList: this.provenanceList,
+          temporaryRules: this.temporaryRules,
+          reflectionLogs: this.reflectionLogs,
+        },
+      });
     } catch (e) {
       console.error('MemoryStore failed to save to storage:', e);
     }
+  }
+
+  // Pre-Flight Journal Management
+  public addPendingJournal(userMessage: string, sessionId: string): JournalEntry {
+    const entry: JournalEntry = {
+      id: `journal-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      userMessage,
+      timestamp: new Date().toISOString(),
+      sessionId,
+      processed: false,
+    };
+    this.pendingJournal.push(entry);
+    // Sliding window: keep max 50 pending journal items total
+    if (this.pendingJournal.length > 50) {
+      this.pendingJournal = this.pendingJournal.slice(-50);
+    }
+    this.saveToStorage(); // Synchronous write & flush to possibilities_vault.json before network request
+    return entry;
+  }
+
+  public getPendingJournal(): JournalEntry[] {
+    return this.pendingJournal.filter((j) => !j.processed);
+  }
+
+  public markJournalProcessed(ids: string[]): void {
+    this.pendingJournal = this.pendingJournal.map((j) =>
+      ids.includes(j.id) ? { ...j, processed: true } : j
+    );
+    // Sliding window: prune processed entries, retaining only unprocessed and max 5 recent processed entries for audit
+    const unprocessed = this.pendingJournal.filter((j) => !j.processed);
+    const recentProcessed = this.pendingJournal.filter((j) => j.processed).slice(-5);
+    this.pendingJournal = [...unprocessed, ...recentProcessed];
+    this.saveToStorage();
+  }
+
+  public clearPendingJournal(): void {
+    this.pendingJournal = [];
+    this.saveToStorage();
   }
 
   public enforceCreatorIdentity(): void {
@@ -391,6 +520,10 @@ export class MemoryStore {
     };
 
     this.episodicEvents.unshift(event);
+    // Sliding window: cap episodic events to most recent 100 items to keep vault storage lightweight
+    if (this.episodicEvents.length > 100) {
+      this.episodicEvents = this.episodicEvents.slice(0, 100);
+    }
     this.saveToStorage();
     return event;
   }

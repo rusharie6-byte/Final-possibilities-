@@ -311,6 +311,7 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
         }
 
         // Generate Memory System Context to append to Gemini system instructions
+        await memoryStore.isReady;
         const memoryContext = companionEngine.getMemoryPromptContext();
 
         const fullSystemInstruction =

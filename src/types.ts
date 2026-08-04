@@ -85,6 +85,14 @@ export interface BrainNode {
   isActive?: boolean;
 }
 
+export interface StagedActionPayload {
+  proposalId: string;
+  toolName: string;
+  arguments: Record<string, any>;
+  status: 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'EXECUTED' | 'FAILED';
+  executionResult?: string;
+}
+
 export interface ChatMessage {
   id: string;
   sender: 'user' | 'possibilities';
@@ -92,6 +100,7 @@ export interface ChatMessage {
   timestamp: string;
   thoughtProcess?: string;
   isStreaming?: boolean;
+  stagedAction?: StagedActionPayload;
 }
 
 export interface CommitReceipt {

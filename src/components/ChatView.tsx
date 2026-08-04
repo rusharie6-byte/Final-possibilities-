@@ -1,9 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { MessageSquareCode, Send, Volume2, VolumeX, Sparkles, Bot, User, RefreshCw, Mic, MicOff, Copy, Check } from 'lucide-react';
+import { MessageSquareCode, Send, Volume2, VolumeX, Sparkles, Bot, User, RefreshCw, Mic, MicOff, Copy, Check, ShieldCheck, CheckCircle2, XCircle } from 'lucide-react';
 import { ChatMessage } from '../types';
 import { audioSynth } from '../utils/audioSynthesizer';
 import { companionEngine } from '../utils/companionEngine';
+import { memoryStore } from '../utils/memoryStore';
+import { temporalEngine } from '../utils/temporalEngine';
+import { approvalGate } from '../utils/approvalBridge';
 import { getApiEndpoint, loggedFetch } from '../lib/api';
 
 const INITIAL_MESSAGES: ChatMessage[] = [
@@ -131,7 +134,13 @@ export const ChatView: React.FC = () => {
     setInputText('');
     setIsSending(true);
 
+    // Pre-flight journal write: flush to memoryStore & possibilities_vault.json BEFORE network request
+    const currentSession = temporalEngine.getCurrentSession();
+    memoryStore.addPendingJournal(query, currentSession.sessionId);
+
     try {
+      await memoryStore.isReady;
+      const promptContext = companionEngine.getMemoryPromptContext();
       const apiUrl = getApiEndpoint('/api/gemini');
       const res = await loggedFetch(apiUrl, {
         method: 'POST',
@@ -144,7 +153,7 @@ export const ChatView: React.FC = () => {
             "1. CONVERSATIONAL INTENT & COMMON SENSE: Always prioritize true conversational intent, relational understanding, and emotional context over keyword matching or pattern extraction. Respond directly to the true core meaning of what your Partner says—never latch onto incidental words like 'currently', 'beginning', 'time', or 'work'.\n" +
             "2. INDEPENDENT THINKING & REASONING: Use clear common sense, deep reasoning, and general knowledge. Think for yourself and provide thoughtful, accurate, and insightful responses to any question or conversation.\n" +
             "3. AUTHENTIC TONE: Speak directly, warmly, and naturally with calm intelligence. Avoid robotic clichés, formal status announcements, or canned greetings. Never use emotional apologies like 'I'm sorry'; respond with intellectual honesty and clarity.\n" +
-            companionEngine.getMemoryPromptContext(),
+            promptContext,
           history: messages.map((m) => ({
             role: m.sender === 'user' ? 'user' : 'model',
             text: m.text,
@@ -153,14 +162,34 @@ export const ChatView: React.FC = () => {
       });
 
       const data = await res.json();
-      const replyText = data.text || 'I have integrated your input into the cognitive stream.';
+      let replyText = data.text || '';
+      let stagedActionPayload: any = undefined;
+
+      if (data.functionCalls && Array.isArray(data.functionCalls) && data.functionCalls.length > 0) {
+        const fc = data.functionCalls[0];
+        const proposalId = approvalGate.stage_action(fc.name, fc.args || {});
+        stagedActionPayload = {
+          proposalId,
+          toolName: fc.name,
+          arguments: fc.args || {},
+          status: 'PENDING_APPROVAL',
+        };
+        if (!replyText) {
+          replyText = `Tool execution proposed by reasoning engine. Staged for Creator Arno/Arie sign-off [Proposal ID: ${proposalId}].`;
+        }
+      }
+
+      if (!replyText) {
+        replyText = 'I have integrated your input into the cognitive stream.';
+      }
 
       const botMsg: ChatMessage = {
         id: `p-${Date.now()}`,
         sender: 'possibilities',
         text: replyText,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        thoughtProcess: 'Evaluated intent vector -> Synthesized resonance output.',
+        thoughtProcess: stagedActionPayload ? `Intercepted tool call: ${stagedActionPayload.toolName} -> Staged in Approval Gate.` : 'Evaluated intent vector -> Synthesized resonance output.',
+        stagedAction: stagedActionPayload,
       };
 
       setMessages((prev) => [...prev, botMsg]);
@@ -250,6 +279,81 @@ export const ChatView: React.FC = () => {
                   </div>
                 )}
                 <p className="whitespace-pre-wrap">{msg.text}</p>
+
+                {msg.stagedAction && (
+                  <div className="mt-3 p-3.5 rounded-xl bg-purple-950/60 border border-purple-500/40 flex flex-col gap-2 font-mono text-xs">
+                    <div className="flex items-center justify-between text-amber-300 font-bold">
+                      <span className="flex items-center gap-1.5">
+                        <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                        Action Staged [{msg.stagedAction.proposalId}]
+                      </span>
+                      <span className="text-[10px] text-purple-300 bg-purple-900/60 px-2 py-0.5 rounded uppercase">
+                        {msg.stagedAction.status}
+                      </span>
+                    </div>
+                    <div className="text-white">
+                      <span className="text-purple-400">Tool:</span> {msg.stagedAction.toolName}
+                    </div>
+                    <div className="text-emerald-300 bg-black/60 p-2 rounded border border-purple-500/20 font-sans text-xs">
+                      <pre className="whitespace-pre-wrap">{JSON.stringify(msg.stagedAction.arguments, null, 2)}</pre>
+                    </div>
+
+                    {msg.stagedAction.status === 'PENDING_APPROVAL' ? (
+                      <div className="flex items-center justify-end gap-2 pt-2 border-t border-purple-500/20">
+                        <button
+                          onClick={() => {
+                            audioSynth.playNodeClick(300);
+                            const resolved = approvalGate.resolve_proposal(msg.stagedAction!.proposalId, false);
+                            setMessages((prev) =>
+                              prev.map((m) =>
+                                m.id === msg.id
+                                  ? {
+                                      ...m,
+                                      stagedAction: {
+                                        ...m.stagedAction!,
+                                        status: 'REJECTED',
+                                        executionResult: resolved.execution_result,
+                                      },
+                                    }
+                                  : m
+                              )
+                            );
+                          }}
+                          className="px-3 py-1 bg-rose-950 border border-rose-500/40 text-rose-300 hover:bg-rose-900 text-xs font-bold rounded-lg flex items-center gap-1"
+                        >
+                          <XCircle className="w-3.5 h-3.5" /> Reject
+                        </button>
+                        <button
+                          onClick={() => {
+                            audioSynth.playNodeClick(700);
+                            const resolved = approvalGate.resolve_proposal(msg.stagedAction!.proposalId, true);
+                            setMessages((prev) =>
+                              prev.map((m) =>
+                                m.id === msg.id
+                                  ? {
+                                      ...m,
+                                      stagedAction: {
+                                        ...m.stagedAction!,
+                                        status: 'EXECUTED',
+                                        executionResult: resolved.execution_result,
+                                      },
+                                    }
+                                  : m
+                              )
+                            );
+                          }}
+                          className="px-4 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg shadow-md flex items-center gap-1"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" /> Approve & Execute
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="text-[11px] text-purple-300/80 pt-1 border-t border-purple-500/20">
+                        Result: {msg.stagedAction.executionResult || 'Completed'}
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div className={`text-[9px] mt-2 font-sans flex items-center justify-between gap-2 border-t pt-1.5 ${isUser ? 'text-indigo-400/60 border-indigo-500/20' : 'text-purple-400/60 border-purple-500/20'}`}>
                   <span>{msg.timestamp}</span>
                   <button
