@@ -134,6 +134,16 @@ export interface MemoryWriteProposal {
   receipt?: CommitReceipt;
 }
 
+export interface CodePatchProposal {
+  proposalId: string;
+  createdAt: string;
+  filePath: string;
+  content: string;
+  justification: string;
+  status: 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'APPLIED' | 'FAILED';
+  receipt?: CommitReceipt;
+}
+
 export interface ConversationBackup {
   version: string;
   exportedAt: string;

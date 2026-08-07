@@ -10,11 +10,17 @@ import {
   Check,
   Brain,
   Trash2,
+  Sliders,
+  Volume2,
+  VolumeX,
+  X,
+  MoreVertical,
 } from 'lucide-react';
 import { SystemMode } from '../types';
 import { AmbientParticlesCanvas } from './AmbientParticlesCanvas';
 import { audioSynth } from '../utils/audioSynthesizer';
 import { companionEngine } from '../utils/companionEngine';
+import { memoryStore } from '../utils/memoryStore';
 import { getApiEndpoint, loggedFetch } from '../lib/api';
 
 const orbImageUrl = new URL('../assets/images/crystal_orb_asset_1785163496547.jpg', import.meta.url).href;
@@ -63,6 +69,7 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
   const [isProcessing, setIsProcessing] = useState(false);
   const [micPermissionNotice, setMicPermissionNotice] = useState<string | null>(null);
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
+  const [isOptionsMenuOpen, setIsOptionsMenuOpen] = useState(false);
 
   // 🔮 POSSIBILITIES Voice Output Toggle (Speaker ON / OFF)
   const [isPossibilitiesVoiceOn, setIsPossibilitiesVoiceOn] = useState(true);
@@ -657,28 +664,6 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
             <span className="hidden sm:inline">{isApiOnline ? 'ORB ALIVE' : 'ORB STABLE'}</span>
           </div>
 
-          {/* Voice Output (TTS) Toggle */}
-          <button
-            onClick={toggleVoiceOutput}
-            className={`px-3 py-1.5 rounded-full border text-[11px] font-semibold tracking-wide transition-all flex items-center gap-2 backdrop-blur-xl ${
-              isPossibilitiesVoiceOn
-                ? 'bg-purple-950/80 text-purple-200 border-purple-400/50 shadow-[0_0_20px_rgba(168,85,247,0.35)]'
-                : 'bg-zinc-900/80 text-zinc-400 border-zinc-800 hover:text-zinc-200'
-            }`}
-            title="Speech Output (ON / OFF)"
-          >
-            <div className="relative flex items-center justify-center">
-              <span
-                className={`w-2 h-2 rounded-full ${
-                  isPossibilitiesVoiceOn
-                    ? 'bg-purple-400 animate-pulse shadow-[0_0_8px_#A855F7]'
-                    : 'bg-zinc-700'
-                }`}
-              />
-            </div>
-            <span>{isPossibilitiesVoiceOn ? 'SPEAKER ON' : 'SPEAKER OFF'}</span>
-          </button>
-
           {/* Quick Memory Access Badge */}
           <button
             onClick={() => {
@@ -696,39 +681,145 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
           </button>
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* Clear Chat Stream Button */}
-          <button
-            onClick={handleClearChatHistory}
-            className="p-2 rounded-full bg-zinc-950/80 hover:bg-rose-950/80 text-zinc-400 hover:text-rose-300 border border-zinc-800 hover:border-rose-500/40 transition-all backdrop-blur-xl"
-            title="Clear Chat History Stream"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
-
-          {/* Right Top: Voice Input Mic Toggle */}
+        {/* OPTIONS MENU */}
+        <div className="relative">
           <button
             type="button"
-            onClick={toggleHumanMic}
-            className={`px-3 py-1.5 rounded-full border text-[11px] font-semibold tracking-wide transition-all flex items-center gap-2 backdrop-blur-xl ${
-              isMicActive
-                ? 'bg-purple-600 text-white border-purple-400 shadow-[0_0_20px_rgba(168,85,247,0.6)] animate-pulse'
-                : 'bg-zinc-900/90 text-purple-300 border-purple-500/30 hover:border-purple-400 hover:text-purple-200'
+            onClick={() => {
+              audioSynth.playNodeClick(500);
+              setIsOptionsMenuOpen((prev) => !prev);
+            }}
+            className={`px-3 py-1.5 rounded-full border text-[11px] font-semibold tracking-wide transition-all flex items-center gap-1.5 backdrop-blur-xl ${
+              isOptionsMenuOpen || isMicActive
+                ? 'bg-purple-600 text-white border-purple-400 shadow-[0_0_20px_rgba(168,85,247,0.5)]'
+                : 'bg-zinc-900/90 text-purple-300 border-purple-500/30 hover:border-purple-400 hover:text-purple-100'
             }`}
-            title="Toggle Voice Input (ON / OFF)"
+            title="Open Companion Options Menu"
           >
-            {isMicActive ? (
-              <>
-                <Mic className="w-3.5 h-3.5 text-white" />
-                <span>MIC ON</span>
-              </>
-            ) : (
-              <>
-                <MicOff className="w-3.5 h-3.5 text-purple-300" />
-                <span>MIC OFF</span>
-              </>
+            <Sliders className="w-3.5 h-3.5 text-purple-200" />
+            <span>OPTIONS</span>
+            {(isMicActive || !isPossibilitiesVoiceOn) && (
+              <span className="w-2 h-2 rounded-full bg-purple-400 animate-pulse" />
             )}
           </button>
+
+          <AnimatePresence>
+            {isOptionsMenuOpen && (
+              <>
+                {/* Backdrop overlay to close menu on click outside */}
+                <div
+                  className="fixed inset-0 z-40"
+                  onClick={() => setIsOptionsMenuOpen(false)}
+                />
+
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95, y: 8 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: 8 }}
+                  transition={{ duration: 0.15 }}
+                  className="absolute right-0 mt-2 w-64 p-3.5 rounded-2xl bg-zinc-950/95 border border-purple-500/40 backdrop-blur-2xl shadow-[0_20px_50px_rgba(0,0,0,0.95)] z-50 text-xs font-mono flex flex-col gap-2.5"
+                >
+                  <div className="flex items-center justify-between pb-2 border-b border-purple-500/20 text-purple-300 font-bold tracking-wider">
+                    <span className="flex items-center gap-1.5 text-[11px] uppercase">
+                      <Sliders className="w-3.5 h-3.5 text-purple-400" />
+                      Option Controls
+                    </span>
+                    <button
+                      onClick={() => setIsOptionsMenuOpen(false)}
+                      className="p-1 rounded-full hover:bg-purple-900/40 text-purple-400 hover:text-white transition-all"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  {/* Option 1: Microphone Input Toggle */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      toggleHumanMic();
+                    }}
+                    className={`flex items-center justify-between p-2.5 rounded-xl border transition-all text-left ${
+                      isMicActive
+                        ? 'bg-purple-900/60 border-purple-400 text-white shadow-[0_0_15px_rgba(168,85,247,0.3)]'
+                        : 'bg-zinc-900/60 border-purple-500/20 text-purple-200 hover:bg-purple-950/40'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      {isMicActive ? (
+                        <Mic className="w-4 h-4 text-purple-300 animate-pulse" />
+                      ) : (
+                        <MicOff className="w-4 h-4 text-zinc-500" />
+                      )}
+                      <div className="flex flex-col">
+                        <span className="font-semibold text-xs">Mic Input</span>
+                        <span className="text-[9px] text-purple-300/60 font-sans">Voice speech recognition</span>
+                      </div>
+                    </div>
+                    <span
+                      className={`text-[9px] px-2 py-0.5 rounded font-bold uppercase tracking-wider ${
+                        isMicActive ? 'bg-purple-600 text-white' : 'bg-zinc-800 text-zinc-400'
+                      }`}
+                    >
+                      {isMicActive ? 'ACTIVE' : 'OFF'}
+                    </span>
+                  </button>
+
+                  {/* Option 2: Voice Speaker Output Toggle */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      toggleVoiceOutput();
+                    }}
+                    className={`flex items-center justify-between p-2.5 rounded-xl border transition-all text-left ${
+                      isPossibilitiesVoiceOn
+                        ? 'bg-purple-900/60 border-purple-400 text-white'
+                        : 'bg-zinc-900/60 border-purple-500/20 text-zinc-400 hover:bg-purple-950/40'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      {isPossibilitiesVoiceOn ? (
+                        <Volume2 className="w-4 h-4 text-purple-300" />
+                      ) : (
+                        <VolumeX className="w-4 h-4 text-zinc-500" />
+                      )}
+                      <div className="flex flex-col">
+                        <span className="font-semibold text-xs">Speaker Output</span>
+                        <span className="text-[9px] text-purple-300/60 font-sans">Speech synthesis audio</span>
+                      </div>
+                    </div>
+                    <span
+                      className={`text-[9px] px-2 py-0.5 rounded font-bold uppercase tracking-wider ${
+                        isPossibilitiesVoiceOn ? 'bg-purple-600 text-white' : 'bg-zinc-800 text-zinc-400'
+                      }`}
+                    >
+                      {isPossibilitiesVoiceOn ? 'ON' : 'MUTED'}
+                    </span>
+                  </button>
+
+                  {/* Option 3: Clear Chat Stream */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleClearChatHistory();
+                      setIsOptionsMenuOpen(false);
+                    }}
+                    className="flex items-center justify-between p-2.5 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 border border-rose-500/30 text-rose-300 transition-all text-left"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Trash2 className="w-4 h-4 text-rose-400" />
+                      <div className="flex flex-col">
+                        <span className="font-semibold text-xs text-rose-200">Clear Chat</span>
+                        <span className="text-[9px] text-rose-300/60 font-sans">Reset visible transcript</span>
+                      </div>
+                    </div>
+                    <span className="text-[9px] px-2 py-0.5 rounded bg-rose-900/80 text-rose-100 font-bold uppercase tracking-wider">
+                      CLEAR
+                    </span>
+                  </button>
+                </motion.div>
+              </>
+            )}
+          </AnimatePresence>
         </div>
       </motion.div>
 
