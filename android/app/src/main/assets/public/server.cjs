@@ -33,6 +33,7 @@ async function startServer() {
   const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3e3;
   app.use((req, res, next) => {
     res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE");
     res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
     if (req.method === "OPTIONS") {
       return res.sendStatus(200);
@@ -40,6 +41,45 @@ async function startServer() {
     next();
   });
   app.use(import_express.default.json({ limit: "10mb" }));
+  app.get("/api/health", async (req, res) => {
+    const apiKey = process.env.GEMINI_API_KEY;
+    const geminiKeyPresent = Boolean(
+      apiKey && apiKey !== "MY_GEMINI_API_KEY" && apiKey.trim() !== ""
+    );
+    let geminiConnection = "not_checked";
+    if (req.query.checkGemini === "true" && geminiKeyPresent) {
+      try {
+        const ai = new import_genai.GoogleGenAI({
+          apiKey,
+          httpOptions: {
+            headers: {
+              "User-Agent": "aistudio-build"
+            }
+          }
+        });
+        const testResponse = await ai.models.generateContent({
+          model: "gemini-3.6-flash",
+          contents: "ping"
+        });
+        if (testResponse && testResponse.text) {
+          geminiConnection = "success";
+        }
+      } catch (err) {
+        console.warn("Diagnostics test call to Gemini failed:", err);
+        geminiConnection = "fail";
+      }
+    } else if (geminiKeyPresent) {
+      geminiConnection = "success";
+    }
+    res.json({
+      status: "ok",
+      alive: true,
+      timestamp: Date.now(),
+      geminiKeyPresent,
+      geminiConnection,
+      backendOnline: true
+    });
+  });
   app.post("/api/gemini", async (req, res) => {
     try {
       const apiKey = process.env.GEMINI_API_KEY;
@@ -86,13 +126,56 @@ ${item.parts[0].text}`;
           contents = sanitized;
         }
       }
+      const toolDeclarations = [
+        {
+          functionDeclarations: [
+            {
+              name: "propose_core_memory_update",
+              description: "Proposes an update, addition, or removal to Possibilities Core Memory. Requires user approval.",
+              parameters: {
+                type: "OBJECT",
+                properties: {
+                  action: { type: "STRING", enum: ["add", "update", "delete"] },
+                  key: { type: "STRING", description: "The memory key/tag" },
+                  content: { type: "STRING", description: "The exact memory text to store" },
+                  reasoning: { type: "STRING", description: "Why this core memory change is being proposed" }
+                },
+                required: ["action", "key", "content", "reasoning"]
+              }
+            },
+            {
+              name: "propose_file_write",
+              description: "Proposes writing or updating a code/config file in the shell environment. Requires user approval.",
+              parameters: {
+                type: "OBJECT",
+                properties: {
+                  file_path: { type: "STRING", description: "Relative or absolute path to target file" },
+                  content: { type: "STRING", description: "Full file content to write" },
+                  reasoning: { type: "STRING", description: "Purpose of this modification" }
+                },
+                required: ["file_path", "content", "reasoning"]
+              }
+            }
+          ]
+        }
+      ];
+      const config = {
+        tools: toolDeclarations
+      };
+      if (systemInstruction) {
+        config.systemInstruction = systemInstruction;
+      }
       const response = await ai.models.generateContent({
         model: "gemini-3.6-flash",
         contents,
-        config: systemInstruction ? { systemInstruction } : void 0
+        config
       });
-      if (response && response.text) {
-        return res.json({ text: response.text });
+      const functionCalls = response.functionCalls || [];
+      if (response && response.text || functionCalls.length > 0) {
+        return res.json({
+          text: response.text || "",
+          functionCalls
+        });
       }
       throw new Error("No text response received from Gemini model.");
     } catch (error) {
@@ -103,40 +186,6 @@ ${item.parts[0].text}`;
         error: error?.message || "Internal error"
       });
     }
-  });
-  app.get("/api/health", async (req, res) => {
-    const apiKey = process.env.GEMINI_API_KEY;
-    const geminiKeyPresent = Boolean(
-      apiKey && apiKey !== "MY_GEMINI_API_KEY" && apiKey.trim() !== ""
-    );
-    let geminiConnection = "fail";
-    if (geminiKeyPresent) {
-      try {
-        const ai = new import_genai.GoogleGenAI({
-          apiKey,
-          httpOptions: {
-            headers: {
-              "User-Agent": "aistudio-build"
-            }
-          }
-        });
-        const testResponse = await ai.models.generateContent({
-          model: "gemini-3.6-flash",
-          contents: "ping"
-        });
-        if (testResponse && testResponse.text) {
-          geminiConnection = "success";
-        }
-      } catch (err) {
-        console.warn("Diagnostics test call to Gemini failed:", err);
-        geminiConnection = "fail";
-      }
-    }
-    res.json({
-      geminiKeyPresent,
-      geminiConnection,
-      backendOnline: true
-    });
   });
   if (process.env.NODE_ENV !== "production") {
     const vite = await (0, import_vite.createServer)({

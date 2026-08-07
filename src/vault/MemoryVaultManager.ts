@@ -1,10 +1,6 @@
 /**
- * ZERO-KNOWLEDGE ENCRYPTED MEMORY VAULT (PRODUCTION ANDROID SAF IMPLEMENTATION)
- * File Target: /src/vault/MemoryVaultManager.ts
- * 
- * Provides local AES-256-GCM encryption/decryption routines for memory snapshots.
- * Writes physical encrypted `.vault` files directly to Android Public Storage (/Documents/Possibilities/Vault/)
- * via Capacitor Native Filesystem. Survives app uninstalls and factory package wipes.
+ * ZERO-KNOWLEDGE ENCRYPTED MEMORY VAULT (PRODUCTION CAPACITOR IMPLEMENTATION)
+ * File Target: src/vault/MemoryVaultManager.ts
  */
 
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
@@ -33,8 +29,24 @@ export class MemoryVaultManager {
   }
 
   /**
+   * Explicitly requests physical storage permissions on Android/iOS.
+   */
+  public async ensureStoragePermissions(): Promise<boolean> {
+    try {
+      const check = await Filesystem.checkPermissions();
+      if (check.publicStorage === 'granted') {
+        return true;
+      }
+      const request = await Filesystem.requestPermissions();
+      return request.publicStorage === 'granted';
+    } catch (err) {
+      console.warn('[VAULT PERMISSIONS] Error requesting permissions natively:', err);
+      return false;
+    }
+  }
+
+  /**
    * Derives AES-256-GCM CryptoKey dynamically via PBKDF2 using dynamic Creator Key material & salt.
-   * NO hardcoded static key strings in source code.
    */
   private async deriveDynamicCryptoKey(creatorAuthKey: string, saltBytes: Uint8Array): Promise<CryptoKey> {
     const encoder = new TextEncoder();
@@ -82,7 +94,6 @@ export class MemoryVaultManager {
     const saltHex = Array.from(salt).map(b => b.toString(16).padStart(2, '0')).join('');
     const encryptedHex = Array.from(encryptedArray).map(b => b.toString(16).padStart(2, '0')).join('');
 
-    // Compute SHA-256 checksum signature of output
     const sigDigest = await crypto.subtle.digest('SHA-256', encoder.encode(encryptedHex + ivHex + saltHex));
     const sha256Signature = Array.from(new Uint8Array(sigDigest)).map(b => b.toString(16).padStart(2, '0')).join('');
 
@@ -91,7 +102,7 @@ export class MemoryVaultManager {
       version: '2.0.0-ZK-VAULT',
       createdAt: new Date().toISOString(),
       creatorPublicKeyED25519: 'ed25519-pub-creator-arno-arie',
-      ivHex: ivHex + saltHex, // Packed IV (24 hex) + Salt (32 hex)
+      ivHex: ivHex + saltHex,
       encryptedDataHex: encryptedHex,
       authTagHex: sha256Signature.substring(0, 32),
       sha256Signature,
@@ -105,7 +116,6 @@ export class MemoryVaultManager {
     const encoder = new TextEncoder();
     const decoder = new TextDecoder();
 
-    // Unpack IV and Salt
     const ivHex = payload.ivHex.substring(0, 24);
     const saltHex = payload.ivHex.substring(24);
 
@@ -113,7 +123,6 @@ export class MemoryVaultManager {
     const salt = new Uint8Array(saltHex.match(/.{1,2}/g)?.map(byte => parseInt(byte, 16)) || []);
     const encryptedData = new Uint8Array(payload.encryptedDataHex.match(/.{1,2}/g)?.map(byte => parseInt(byte, 16)) || []);
 
-    // Verify SHA-256 Integrity Signature before decryption
     const sigDigest = await crypto.subtle.digest('SHA-256', encoder.encode(payload.encryptedDataHex + ivHex + saltHex));
     const expectedSig = Array.from(new Uint8Array(sigDigest)).map(b => b.toString(16).padStart(2, '0')).join('');
 
@@ -133,16 +142,19 @@ export class MemoryVaultManager {
 
   /**
    * Writes physical encrypted `.vault` file to Android Public Storage (/Documents/Possibilities/Vault/).
-   * Uses Capacitor Native Filesystem -> Directory.Documents.
    */
   public async exportEncryptedVaultToStorage(creatorAuthKey: string): Promise<{ success: boolean; vaultFilePath: string; payload: EncryptedVaultPayload }> {
+    const hasPermission = await this.ensureStoragePermissions();
+    if (!hasPermission) {
+      console.warn('[VAULT WARNING] Proceeding without explicit permission grant. Write may fail under Scoped Storage.');
+    }
+
     const rawData = JSON.stringify(memoryStore.exportMemoryData());
     const encryptedPayload = await this.encryptVaultData(rawData, creatorAuthKey);
 
     const filename = `possibilities_vault_${encryptedPayload.vaultId}.vault`;
     const relativeFilePath = `${this.vaultSubFolder}/${filename}`;
 
-    // Ensure physical folder structure exists on physical disk
     try {
       await Filesystem.mkdir({
         path: this.vaultSubFolder,
@@ -153,7 +165,6 @@ export class MemoryVaultManager {
       // Directory already exists
     }
 
-    // Write physical file to physical device public storage
     await Filesystem.writeFile({
       path: relativeFilePath,
       data: JSON.stringify(encryptedPayload, null, 2),
@@ -176,6 +187,7 @@ export class MemoryVaultManager {
    */
   public async restoreFromVaultOnReinstall(creatorAuthKey: string): Promise<{ success: boolean; itemsRestored: number; message: string }> {
     console.log('[REINSTALL RESTORE PIPELINE] Scanning physical disk: Documents/Possibilities/Vault/...');
+    await this.ensureStoragePermissions();
 
     try {
       const dirResult = await Filesystem.readdir({
@@ -184,10 +196,10 @@ export class MemoryVaultManager {
       });
 
       const vaultFiles = dirResult.files
-        .map(f => f.name)
+        .map(f => (typeof f === 'string' ? f : f.name))
         .filter(name => name.endsWith('.vault'))
         .sort()
-        .reverse(); // Latest snapshot first
+        .reverse();
 
       if (vaultFiles.length === 0) {
         return {
