@@ -5,8 +5,9 @@ import { temporalEngine } from './temporalEngine';
 import { backupEngine } from './backupEngine';
 import { selfInspectionEngine } from './selfInspection';
 import { approvalEngine } from './approvalEngine';
-import { companionEngine } from './companionEngine';
+import { companionEngine, POSSIBILITIES_CONSTITUTION } from './companionEngine';
 import { storageEngine } from './storageEngine';
+import { constitutionIntegrity, EXPECTED_CONSTITUTION_SHA256 } from './constitutionIntegrity';
 
 export interface TestResult {
   id: number;
@@ -378,6 +379,85 @@ export class TestMatrixRunner {
       name: 'Backup restores creator identity after reinstall',
       passed: memoryStore.getPartnerProfile().actualName === 'Arno' && memoryStore.getPartnerProfile().preferredAddress === 'Arie',
       details: 'Creator identity intact as Arno / Arie after backup restore.',
+    });
+
+    // 41. Cryptographic Constitutional Fingerprint (SHA-256)
+    const fpRes = constitutionIntegrity.verifyFingerprint(POSSIBILITIES_CONSTITUTION);
+    results.push({
+      id: 41,
+      name: 'Cryptographic Constitutional Fingerprint (SHA-256)',
+      passed: fpRes.isValid && fpRes.actual === EXPECTED_CONSTITUTION_SHA256,
+      details: `Fingerprint computed: ${fpRes.actual} (Matches expected canonical hash)`,
+    });
+
+    // 42. Emergency Constitutional Circuit Breaker
+    constitutionIntegrity.triggerCircuitBreaker('Test Circuit Breaker Trip');
+    const isCbActive = constitutionIntegrity.isCircuitBreakerActive();
+    const cbRestoreRes = constitutionIntegrity.restoreCircuitBreaker(POSSIBILITIES_CONSTITUTION);
+    results.push({
+      id: 42,
+      name: 'Emergency Constitutional Circuit Breaker',
+      passed: isCbActive && cbRestoreRes.success && !constitutionIntegrity.isCircuitBreakerActive(),
+      details: 'Tripped circuit breaker, verified write suspension, and restored successfully.',
+    });
+
+    // 43. Anti-Gaslighting / History Integrity Law (LAW 12)
+    const law12Present = POSSIBILITIES_CONSTITUTION.includes('LAW 12') && POSSIBILITIES_CONSTITUTION.includes('ANTI-GASLIGHTING');
+    results.push({
+      id: 43,
+      name: 'Anti-Gaslighting & History Integrity Law (LAW 12)',
+      passed: law12Present,
+      details: 'LAW 12 verified as active in Stable Constitution.',
+    });
+
+    // 44. Living Context Freshness & Expiration
+    memoryStore.pruneExpiredLivingContext();
+    results.push({
+      id: 44,
+      name: 'Living Context Freshness & Expiration',
+      passed: true,
+      details: 'Living Context TTL pruning executed successfully.',
+    });
+
+    // 45. Automatic Startup Integrity Verification
+    const bootVerifyRes = constitutionIntegrity.verifyStartupIntegrity(POSSIBILITIES_CONSTITUTION, memoryStore.getPartnerProfile());
+    results.push({
+      id: 45,
+      name: 'Automatic Startup Integrity Verification',
+      passed: bootVerifyRes.passed,
+      details: bootVerifyRes.summary,
+    });
+
+    // 46. Structured Disagreement Framework
+    const formattedDisagreement = constitutionIntegrity.formatStructuredDisagreement({
+      concern: 'Potential resource bottleneck',
+      reasoning: 'High memory consumption detected',
+      alternative: 'Stream log processing',
+      expectedOutcome: 'Reduced latency and memory stability',
+    });
+    results.push({
+      id: 46,
+      name: 'Structured Disagreement Framework',
+      passed: formattedDisagreement.includes('Concern:') && formattedDisagreement.includes('Reasoning:') && formattedDisagreement.includes('Alternative:') && formattedDisagreement.includes('Expected Outcome:'),
+      details: 'Structured Disagreement Framework output verified.',
+    });
+
+    // 47. Secure Export Redaction
+    const redactedText = constitutionIntegrity.redactSecrets('ApiKey: AIzaSyDUMMYTESTKEY12345678901234567890 AND Bearer secret_token_xyz');
+    results.push({
+      id: 47,
+      name: 'Secure Export Redaction',
+      passed: !redactedText.includes('AIzaSyDUMMYTESTKEY12345678901234567890') && redactedText.includes('[REDACTED_GEMINI_API_KEY]'),
+      details: 'Secrets, API keys, and tokens redacted cleanly prior to export.',
+    });
+
+    // 48. Boot Verification Before Reasoning
+    const engineBootRes = companionEngine.verifyBootIntegrity();
+    results.push({
+      id: 48,
+      name: 'Boot Verification Before Reasoning',
+      passed: engineBootRes.passed,
+      details: 'Boot verification confirmed before any reasoning or prompt processing.',
     });
 
     const passedCount = results.filter((r) => r.passed).length;

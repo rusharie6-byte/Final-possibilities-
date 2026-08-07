@@ -4,6 +4,7 @@
 
 import { memoryStore } from './memoryStore';
 import { temporalEngine } from './temporalEngine';
+import { constitutionIntegrity } from './constitutionIntegrity';
 import { ChatMessage, ConversationBackup } from '../types';
 
 export class BackupEngine {
@@ -19,8 +20,7 @@ export class BackupEngine {
 
   private sanitizeSecrets(data: any): any {
     const serialized = JSON.stringify(data);
-    // Redact potential API keys or tokens
-    const cleaned = serialized.replace(/AIzaSy[A-Za-z0-9_-]{33}/g, '[REDACTED_API_KEY]');
+    const cleaned = constitutionIntegrity.redactSecrets(serialized);
     return JSON.parse(cleaned);
   }
 

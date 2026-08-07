@@ -3,6 +3,7 @@
 
 import { PartnerProfile, LivingContext, CoreMemoryItem, ReflectionLogEntry } from '../types';
 import { storageEngine, JournalEntry, VaultPayload } from './storageEngine';
+import { constitutionIntegrity } from './constitutionIntegrity';
 
 export type MemorySource =
   | 'creator_statement'
@@ -403,6 +404,30 @@ export class MemoryStore {
       }
     }
 
+    this.pruneExpiredLivingContext();
+
+    if (changed) {
+      this.saveToStorage();
+    }
+  }
+
+  public pruneExpiredLivingContext(): void {
+    if (constitutionIntegrity.isCircuitBreakerActive()) return;
+
+    let changed = false;
+    // Living context short-term reminders pruning (e.g., items older than 30 days)
+    if (this.livingContext && Array.isArray(this.livingContext.shortTermReminders)) {
+      const lenBefore = this.livingContext.shortTermReminders.length;
+      this.livingContext.shortTermReminders = this.livingContext.shortTermReminders.filter((rem) => {
+        if (!rem.createdAt) return true;
+        const ageMs = Date.now() - new Date(rem.createdAt).getTime();
+        return ageMs < 30 * 24 * 60 * 60 * 1000;
+      });
+      if (this.livingContext.shortTermReminders.length < lenBefore) {
+        changed = true;
+      }
+    }
+
     if (changed) {
       this.saveToStorage();
     }
@@ -417,6 +442,10 @@ export class MemoryStore {
   }
 
   public updatePartnerProfile(updates: Partial<ExtendedPartnerProfile>): ExtendedPartnerProfile {
+    if (constitutionIntegrity.isCircuitBreakerActive()) {
+      console.warn('[CIRCUIT BREAKER ACTIVE] Memory write suspended: updatePartnerProfile');
+      return this.getPartnerProfile();
+    }
     this.partnerProfile = {
       ...this.partnerProfile,
       ...updates,
@@ -429,10 +458,15 @@ export class MemoryStore {
   }
 
   public getLivingContext(): LivingContext {
+    this.pruneExpiredLivingContext();
     return { ...this.livingContext };
   }
 
   public updateLivingContext(updates: Partial<LivingContext>): LivingContext {
+    if (constitutionIntegrity.isCircuitBreakerActive()) {
+      console.warn('[CIRCUIT BREAKER ACTIVE] Memory write suspended: updateLivingContext');
+      return this.getLivingContext();
+    }
     this.livingContext = {
       ...this.livingContext,
       ...updates,
@@ -451,6 +485,15 @@ export class MemoryStore {
     category: CoreMemoryItem['category'] = 'Sacred',
     source: MemorySource = 'creator_statement'
   ): CoreMemoryItem {
+    if (constitutionIntegrity.isCircuitBreakerActive()) {
+      console.warn('[CIRCUIT BREAKER ACTIVE] Memory write suspended: addCoreMemory');
+      return {
+        id: `blocked-${Date.now()}`,
+        text: '[CIRCUIT_BREAKER_ACTIVE_WRITE_SUSPENDED]',
+        category,
+        createdAt: new Date().toISOString(),
+      };
+    }
     const nowIso = new Date().toISOString();
     const item: CoreMemoryItem = {
       id: `core-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
@@ -502,6 +545,22 @@ export class MemoryStore {
     importance = 0.8,
     validUntil?: string | null
   ): EpisodicEvent {
+    if (constitutionIntegrity.isCircuitBreakerActive()) {
+      console.warn('[CIRCUIT BREAKER ACTIVE] Memory write suspended: addEpisodicEvent');
+      return {
+        eventId: `blocked-${Date.now()}`,
+        sessionId: `session-blocked`,
+        eventType,
+        summary: '[CIRCUIT_BREAKER_ACTIVE_WRITE_SUSPENDED]',
+        occurredAt: new Date().toISOString(),
+        recordedAt: new Date().toISOString(),
+        validFrom: new Date().toISOString(),
+        importance: 0,
+        confidence: 0,
+        source,
+        status: 'expired',
+      };
+    }
     const nowIso = new Date().toISOString();
     const event: EpisodicEvent = {
       eventId: `ep-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
