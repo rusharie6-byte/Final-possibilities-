@@ -140,6 +140,31 @@ export const ChatView: React.FC = () => {
 
     try {
       await memoryStore.isReady;
+
+      const history = messages.map((m) => ({
+        sender: (m.sender === 'user' ? 'user' : 'possibilities') as 'user' | 'possibilities',
+        text: m.text,
+      }));
+
+      const outcome = await companionEngine.processInput(query, history);
+
+      if (!outcome.requiresOnlineAi) {
+        const botMsg: ChatMessage = {
+          id: `p-${Date.now()}`,
+          sender: 'possibilities',
+          text: outcome.text,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          thoughtProcess: 'Evaluated intent vector locally -> Processed via Companion Engine.',
+        };
+        setMessages((prev) => [...prev, botMsg]);
+        audioSynth.playEnergyBloom();
+        if (voiceEnabled) {
+          audioSynth.speak(outcome.text);
+        }
+        setIsSending(false);
+        return;
+      }
+
       const promptContext = companionEngine.getMemoryPromptContext();
       const apiUrl = getApiEndpoint('/api/gemini');
       const res = await loggedFetch(apiUrl, {
@@ -199,13 +224,19 @@ export const ChatView: React.FC = () => {
         audioSynth.speak(replyText);
       }
     } catch (err) {
+      console.warn('ChatView online request fallback:', err);
+      const fallbackText = companionEngine.getOfflineFallback(query);
       const errorMsg: ChatMessage = {
         id: `p-err-${Date.now()}`,
         sender: 'possibilities',
-        text: 'Local memory layer synced. Ready for your next directive.',
+        text: fallbackText,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        thoughtProcess: 'Offline reasoning active -> Synthesized local memory output.',
       };
       setMessages((prev) => [...prev, errorMsg]);
+      if (voiceEnabled) {
+        audioSynth.speak(fallbackText);
+      }
     } finally {
       setIsSending(false);
     }
