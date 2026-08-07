@@ -91,7 +91,7 @@ export interface CircuitBreakerState {
   triggeredAt: string | null;
 }
 
-export const EXPECTED_CONSTITUTION_SHA256 = '94113e2b3b6e04a08e2ed98e2c3030507ac78297b770836b2e03d2986e661c61';
+export const EXPECTED_CONSTITUTION_SHA256 = '5ff48f816022a6d95715a65ecb0d68c0d715ca7941f407774803c4c94ab0cbaf';
 
 class ConstitutionIntegrityManager {
   private circuitBreaker: CircuitBreakerState = {

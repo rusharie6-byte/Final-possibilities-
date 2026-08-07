@@ -83,7 +83,7 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
     const checkApiHealth = async () => {
       try {
         const url = getApiEndpoint('/api/health');
-        const res = await loggedFetch(url, { signal: AbortSignal.timeout(4000) });
+        const res = await loggedFetch(url, { signal: AbortSignal.timeout(8000) });
         if (isMounted) {
           setIsApiOnline(res.ok);
         }

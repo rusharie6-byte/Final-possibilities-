@@ -182,9 +182,9 @@ export const loggedFetch = async (
     const durationMs = Date.now() - startTime;
     const errMsg = error?.message || String(error) || 'Failed to fetch (ERR_CONNECTION_REFUSED or Network Failure)';
 
-    console.error(
-      `[NETWORK ERROR] URL: ${urlString} | Method: ${method} | Error:`,
-      error
+    console.warn(
+      `[NETWORK NOTICE] URL: ${urlString} | Method: ${method} | Error:`,
+      errMsg
     );
 
     addNetworkLogEntry({

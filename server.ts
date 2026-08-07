@@ -23,8 +23,48 @@ async function startServer() {
   app.use(express.json({ limit: '10mb' }));
 
   // Health check endpoint for API status
-  app.get("/api/health", (req, res) => {
-    res.json({ status: "ok", alive: true, timestamp: Date.now() });
+  app.get("/api/health", async (req, res) => {
+    const apiKey = process.env.GEMINI_API_KEY;
+    const geminiKeyPresent = Boolean(
+      apiKey && apiKey !== "MY_GEMINI_API_KEY" && apiKey.trim() !== ""
+    );
+
+    let geminiConnection: "success" | "fail" | "not_checked" = "not_checked";
+
+    // Only attempt live Gemini call if explicitly requested via query param
+    if (req.query.checkGemini === 'true' && geminiKeyPresent) {
+      try {
+        const ai = new GoogleGenAI({
+          apiKey: apiKey!,
+          httpOptions: {
+            headers: {
+              'User-Agent': 'aistudio-build',
+            },
+          },
+        });
+        const testResponse = await ai.models.generateContent({
+          model: "gemini-3.6-flash",
+          contents: "ping",
+        });
+        if (testResponse && testResponse.text) {
+          geminiConnection = "success";
+        }
+      } catch (err) {
+        console.warn("Diagnostics test call to Gemini failed:", err);
+        geminiConnection = "fail";
+      }
+    } else if (geminiKeyPresent) {
+      geminiConnection = "success";
+    }
+
+    res.json({
+      status: "ok",
+      alive: true,
+      timestamp: Date.now(),
+      geminiKeyPresent,
+      geminiConnection,
+      backendOnline: true,
+    });
   });
 
   // Server-side Gemini API endpoint
@@ -145,45 +185,6 @@ async function startServer() {
         error: error?.message || "Internal error"
       });
     }
-  });
-
-  // Temporary diagnostics health check
-  app.get("/api/health", async (req, res) => {
-    const apiKey = process.env.GEMINI_API_KEY;
-    const geminiKeyPresent = Boolean(
-      apiKey && apiKey !== "MY_GEMINI_API_KEY" && apiKey.trim() !== ""
-    );
-
-    let geminiConnection: "success" | "fail" = "fail";
-
-    if (geminiKeyPresent) {
-      try {
-        const ai = new GoogleGenAI({
-          apiKey: apiKey!,
-          httpOptions: {
-            headers: {
-              'User-Agent': 'aistudio-build',
-            },
-          },
-        });
-        const testResponse = await ai.models.generateContent({
-          model: "gemini-3.6-flash",
-          contents: "ping",
-        });
-        if (testResponse && testResponse.text) {
-          geminiConnection = "success";
-        }
-      } catch (err) {
-        console.warn("Diagnostics test call to Gemini failed:", err);
-        geminiConnection = "fail";
-      }
-    }
-
-    res.json({
-      geminiKeyPresent,
-      geminiConnection,
-      backendOnline: true,
-    });
   });
 
   // Vite middleware for development vs static serve for production
