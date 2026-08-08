@@ -88,7 +88,7 @@ export const TheNexus: React.FC<TheNexusProps> = ({ onSelectSection, onCollapseN
   };
 
   return (
-    <div className="relative w-full h-full min-h-[580px] flex items-center justify-center select-none overflow-hidden perspective-1000">
+    <div className="relative w-full h-full min-h-[580px] flex items-center justify-center select-text overflow-hidden perspective-1000">
       {/* Dynamic Glass Atmosphere & Depth Grid */}
       <svg className="absolute inset-0 w-full h-full pointer-events-none opacity-40">
         <defs>

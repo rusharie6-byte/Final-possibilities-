@@ -22,6 +22,7 @@ import {
   ShieldCheck,
   CheckCircle2,
   Info,
+  Settings,
 } from 'lucide-react';
 import { SystemMode } from '../types';
 import { AmbientParticlesCanvas } from './AmbientParticlesCanvas';
@@ -30,8 +31,6 @@ import { companionEngine } from '../utils/companionEngine';
 import { memoryStore } from '../utils/memoryStore';
 import { memoryVaultManager } from '../vault/MemoryVaultManager';
 import { getApiEndpoint, loggedFetch } from '../lib/api';
-
-const orbImageUrl = new URL('../assets/images/crystal_orb_asset_1785163496547.jpg', import.meta.url).href;
 
 interface HomeCompanionViewProps {
   systemMode: SystemMode;
@@ -705,56 +704,27 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
   }, []);
 
   return (
-    <div className="w-full h-full min-h-[100dvh] flex flex-col items-center justify-between px-4 py-4 relative select-none overflow-hidden bg-black text-white">
+    <div className="w-full h-full min-h-[100dvh] flex flex-col items-center justify-between px-4 py-4 relative select-text overflow-hidden bg-black text-white">
       {/* ──────────────────────────────────────────────────────────── */}
-      {/* FULL-BLEED LIVING ORB SCREEN BACKGROUND */}
+      {/* ATMOSPHERIC DARK APP ENVIRONMENT */}
       {/* ──────────────────────────────────────────────────────────── */}
-      <div className="fixed inset-0 z-0 pointer-events-none select-none overflow-hidden bg-black">
-        {/* Full-bleed photorealistic living orb visual environment */}
-        <motion.img
-          src={orbImageUrl}
-          alt="Possibilities Screen Environment"
-          initial={{ scale: 1 }}
-          animate={{
-            scale: !isApiOnline
-              ? 1.0 // STABLE state when API is offline
-              : isListening
-              ? [1.02, 1.08, 1.02] // Alive breathing when listening
-              : isProcessing
-              ? [1.02, 1.06, 1.02] // Alive breathing when processing
-              : [1.0, 1.05, 1.0], // Alive continuous breathing motion when API online
-            filter: !isApiOnline
-              ? 'brightness(0.85) contrast(0.95)' // Stable calm state when offline
-              : isListening
-              ? 'brightness(1.20) contrast(1.08)'
-              : isProcessing
-              ? 'brightness(1.12) contrast(1.04)'
-              : 'brightness(1.06) contrast(1.02)', // Living breathing bloom when online
-          }}
-          transition={{
-            duration: !isApiOnline ? 1.5 : isListening ? 3 : isProcessing ? 4 : 8,
-            repeat: !isApiOnline ? 0 : Infinity,
-            ease: 'easeInOut',
-          }}
-          className="w-full h-full object-cover object-center transition-all duration-700"
-        />
-
+      <div className="fixed inset-0 z-0 pointer-events-none select-none overflow-hidden bg-gradient-to-b from-black via-zinc-950 to-purple-950/20">
         {/* Ambient Stardust Floating Particles Overlay */}
-        <div className="absolute inset-0 opacity-70">
+        <div className="absolute inset-0 opacity-60">
           <AmbientParticlesCanvas systemMode={systemMode} isEnergized={isApiOnline && (isListening || isProcessing || true)} />
         </div>
 
         {/* Dynamic Dark Vignette Layer for High Visual Contrast */}
-        <div className="absolute inset-0 bg-radial from-transparent via-purple-950/20 to-black/80" />
+        <div className="absolute inset-0 bg-radial from-transparent via-purple-950/10 to-black/80" />
 
         {/* Pulsing Active Voice / Thought Glow Aura */}
         {(isListening || isProcessing) && (
-          <div className="absolute inset-0 bg-radial from-purple-500/20 via-purple-900/10 to-transparent animate-pulse" />
+          <div className="absolute inset-0 bg-radial from-purple-500/15 via-purple-900/10 to-transparent animate-pulse" />
         )}
       </div>
 
       {/* ──────────────────────────────────────────────────────────── */}
-      {/* TOP HEADER: SPEAKER, MIC, ORB HEALTH & OPTIONS MENU */}
+      {/* TOP HEADER: SPEAKER, MIC, SYSTEM STATUS & OPTIONS MENU */}
       {/* ──────────────────────────────────────────────────────────── */}
       <motion.div
         initial={{ opacity: 0, y: -10 }}
@@ -762,14 +732,14 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
         className="w-full max-w-xl flex items-center justify-between px-2 pt-1 relative z-20"
       >
         <div className="flex items-center gap-1.5 sm:gap-2">
-          {/* Orb Health Status Indicator (Alive when API Online / Stable when Offline) */}
+          {/* API & System Health Status Indicator */}
           <div
             className={`px-2.5 py-1.5 rounded-full border text-[10px] font-mono font-bold tracking-wider flex items-center gap-1.5 backdrop-blur-xl ${
               isApiOnline
                 ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40 shadow-[0_0_15px_rgba(16,185,129,0.3)]'
                 : 'bg-zinc-950/80 text-amber-300 border-amber-500/40'
             }`}
-            title={isApiOnline ? 'API Online — Orb Alive with breathing motion' : 'API Offline — Orb Stable in local mode'}
+            title={isApiOnline ? 'API Connected & Online' : 'Offline / Local Fallback Mode'}
           >
             <span
               className={`w-2 h-2 rounded-full ${
@@ -778,60 +748,97 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
                   : 'bg-amber-400'
               }`}
             />
-            <span className="hidden sm:inline">{isApiOnline ? 'ORB ALIVE' : 'ORB STABLE'}</span>
+            <span className="hidden sm:inline">{isApiOnline ? 'AI ONLINE' : 'LOCAL MODE'}</span>
           </div>
         </div>
 
-        {/* OPTIONS MENU */}
-        <div className="relative">
+        {/* TOP CONTROLS: SETTINGS & OPTIONS */}
+        <div className="flex items-center gap-2 relative">
           <button
             type="button"
             onClick={() => {
               audioSynth.playNodeClick(500);
-              setIsOptionsMenuOpen((prev) => !prev);
+              onOpenPanel('settings');
             }}
-            className={`px-3 py-1.5 rounded-full border text-[11px] font-semibold tracking-wide transition-all flex items-center gap-1.5 backdrop-blur-xl ${
-              isOptionsMenuOpen || isMicActive
-                ? 'bg-purple-600 text-white border-purple-400 shadow-[0_0_20px_rgba(168,85,247,0.5)]'
-                : 'bg-zinc-900/90 text-purple-300 border-purple-500/30 hover:border-purple-400 hover:text-purple-100'
-            }`}
-            title="Open Companion Options Menu"
+            className="px-3 py-1.5 rounded-full border border-purple-500/40 bg-purple-950/80 hover:bg-purple-900/90 text-purple-200 hover:text-white text-[11px] font-semibold tracking-wide transition-all flex items-center gap-1.5 backdrop-blur-xl shadow-[0_0_15px_rgba(168,85,247,0.3)]"
+            title="Open Possibilities App Settings"
           >
-            <Sliders className="w-3.5 h-3.5 text-purple-200" />
-            <span>OPTIONS</span>
-            {(isMicActive || !isPossibilitiesVoiceOn) && (
-              <span className="w-2 h-2 rounded-full bg-purple-400 animate-pulse" />
-            )}
+            <Settings className="w-3.5 h-3.5 text-purple-300" />
+            <span>SETTINGS</span>
           </button>
 
-          <AnimatePresence>
-            {isOptionsMenuOpen && (
-              <>
-                {/* Backdrop overlay to close menu on click outside */}
-                <div
-                  className="fixed inset-0 z-40"
-                  onClick={() => setIsOptionsMenuOpen(false)}
-                />
+          {/* OPTIONS MENU */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                audioSynth.playNodeClick(500);
+                setIsOptionsMenuOpen((prev) => !prev);
+              }}
+              className={`px-3 py-1.5 rounded-full border text-[11px] font-semibold tracking-wide transition-all flex items-center gap-1.5 backdrop-blur-xl ${
+                isOptionsMenuOpen || isMicActive
+                  ? 'bg-purple-600 text-white border-purple-400 shadow-[0_0_20px_rgba(168,85,247,0.5)]'
+                  : 'bg-zinc-900/90 text-purple-300 border-purple-500/30 hover:border-purple-400 hover:text-purple-100'
+              }`}
+              title="Open Companion Options Menu"
+            >
+              <Sliders className="w-3.5 h-3.5 text-purple-200" />
+              <span>OPTIONS</span>
+              {(isMicActive || !isPossibilitiesVoiceOn) && (
+                <span className="w-2 h-2 rounded-full bg-purple-400 animate-pulse" />
+              )}
+            </button>
 
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.95, y: 8 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.95, y: 8 }}
-                  transition={{ duration: 0.15 }}
-                  className="absolute right-0 mt-2 w-72 p-3.5 rounded-2xl bg-zinc-950/95 border border-purple-500/40 backdrop-blur-2xl shadow-[0_20px_50px_rgba(0,0,0,0.95)] z-50 text-xs font-mono flex flex-col gap-2.5"
-                >
-                  <div className="flex items-center justify-between pb-2 border-b border-purple-500/20 text-purple-300 font-bold tracking-wider">
-                    <span className="flex items-center gap-1.5 text-[11px] uppercase">
-                      <Sliders className="w-3.5 h-3.5 text-purple-400" />
-                      Companion Controls
-                    </span>
+            <AnimatePresence>
+              {isOptionsMenuOpen && (
+                <>
+                  {/* Backdrop overlay to close menu on click outside */}
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setIsOptionsMenuOpen(false)}
+                  />
+
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.95, y: 8 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.95, y: 8 }}
+                    transition={{ duration: 0.15 }}
+                    className="absolute right-0 mt-2 w-72 p-3.5 rounded-2xl bg-zinc-950/95 border border-purple-500/40 backdrop-blur-2xl shadow-[0_20px_50px_rgba(0,0,0,0.95)] z-50 text-xs font-mono flex flex-col gap-2.5"
+                  >
+                    <div className="flex items-center justify-between pb-2 border-b border-purple-500/20 text-purple-300 font-bold tracking-wider">
+                      <span className="flex items-center gap-1.5 text-[11px] uppercase">
+                        <Sliders className="w-3.5 h-3.5 text-purple-400" />
+                        Companion Controls
+                      </span>
+                      <button
+                        onClick={() => setIsOptionsMenuOpen(false)}
+                        className="p-1 rounded-full hover:bg-purple-900/40 text-purple-400 hover:text-white transition-all"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    {/* Option 0: System Settings & API Keys */}
                     <button
-                      onClick={() => setIsOptionsMenuOpen(false)}
-                      className="p-1 rounded-full hover:bg-purple-900/40 text-purple-400 hover:text-white transition-all"
+                      type="button"
+                      onClick={() => {
+                        audioSynth.playNodeClick(600);
+                        onOpenPanel('settings');
+                        setIsOptionsMenuOpen(false);
+                      }}
+                      className="flex items-center justify-between p-2.5 rounded-xl bg-purple-900/40 hover:bg-purple-800/60 border border-purple-400/40 text-purple-100 transition-all text-left shadow-[0_0_12px_rgba(168,85,247,0.2)]"
                     >
-                      <X className="w-3.5 h-3.5" />
+                      <div className="flex items-center gap-2">
+                        <Settings className="w-4 h-4 text-purple-300" />
+                        <div className="flex flex-col">
+                          <span className="font-semibold text-xs text-white">System Settings</span>
+                          <span className="text-[9px] text-purple-300/80 font-sans">API Key, Backend URL & Performance</span>
+                        </div>
+                      </div>
+                      <span className="text-[9px] px-2 py-0.5 rounded bg-purple-600 text-white font-bold uppercase tracking-wider">
+                        OPEN
+                      </span>
                     </button>
-                  </div>
 
                   {/* Option 1: Memory Vault Panel */}
                   <button
@@ -982,7 +989,8 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
             )}
           </AnimatePresence>
         </div>
-      </motion.div>
+      </div>
+    </motion.div>
 
       {/* Hidden File Input for Vault Upload / Restore */}
       <input
@@ -1036,9 +1044,9 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
       {/* ──────────────────────────────────────────────────────────── */}
       {/* CENTER STAGE: CONVERSATION STREAM ON SCREEN */}
       {/* ──────────────────────────────────────────────────────────── */}
-      <div className="flex-1 w-full max-w-xl flex flex-col justify-end relative z-20 my-2 overflow-hidden">
+      <div className="flex-1 w-full max-w-xl flex flex-col justify-end relative z-20 my-2 overflow-hidden rounded-2xl border border-purple-500/30 bg-zinc-950/85 backdrop-blur-2xl shadow-[0_20px_50px_rgba(0,0,0,0.9)] p-2 sm:p-3">
         {/* Scrollable Conversation Stream */}
-        <div className="w-full max-h-[50vh] sm:max-h-[55vh] overflow-y-auto px-2 py-3 space-y-3.5 scrollbar-thin scrollbar-thumb-purple-500/20">
+        <div className="w-full max-h-[50vh] sm:max-h-[55vh] overflow-y-auto px-1 py-2 space-y-3.5 custom-scrollbar select-text">
           <AnimatePresence initial={false}>
             {messages.map((m) => (
               <motion.div
@@ -1051,7 +1059,7 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
                   m.sender === 'user' ? 'items-end' : 'items-start'
                 }`}
               >
-                <div className="flex items-center gap-1.5 text-[10px] font-mono tracking-wider text-purple-300/60 mb-1 px-1">
+                <div className="flex items-center gap-1.5 text-[10px] font-mono tracking-wider text-purple-300/70 mb-1 px-1 select-text">
                   {m.sender === 'possibilities' ? (
                     <>
                       <Sparkles className="w-3 h-3 text-purple-400" />
@@ -1068,13 +1076,13 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
                 </div>
 
                 <div
-                  className={`max-w-[88%] sm:max-w-[82%] px-4 py-3 rounded-2xl text-sm leading-relaxed backdrop-blur-2xl shadow-lg border ${
+                  className={`max-w-[88%] sm:max-w-[82%] px-4 py-3 rounded-2xl text-sm leading-relaxed backdrop-blur-2xl shadow-lg border select-text ${
                     m.sender === 'user'
-                      ? 'rounded-tr-xs bg-purple-900/65 border-purple-400/40 text-purple-50 font-normal shadow-[0_10px_25px_rgba(168,85,247,0.2)]'
-                      : 'rounded-tl-xs bg-zinc-950/85 border-purple-500/30 text-purple-100 font-medium shadow-[0_10px_30px_rgba(0,0,0,0.8)]'
+                      ? 'rounded-tr-xs bg-purple-900/80 border-purple-400/50 text-purple-50 font-normal shadow-[0_10px_25px_rgba(168,85,247,0.25)]'
+                      : 'rounded-tl-xs bg-zinc-900/90 border-purple-500/40 text-purple-100 font-medium shadow-[0_10px_30px_rgba(0,0,0,0.85)]'
                   }`}
                 >
-                  <p className="whitespace-pre-wrap">{m.text}</p>
+                  <p className="whitespace-pre-wrap select-text cursor-text">{m.text}</p>
                   <div className="mt-2 pt-1.5 border-t border-purple-500/20 flex items-center justify-end">
                     <button
                       onClick={() => handleCopyMsg(m.id, m.text)}

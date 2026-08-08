@@ -476,7 +476,7 @@ export const OrbDefenseView: React.FC = () => {
   }, [gameState]);
 
   return (
-    <div className="w-full max-w-5xl mx-auto px-4 py-4 flex flex-col items-center justify-center min-h-[82vh] relative select-none">
+    <div className="w-full max-w-5xl mx-auto px-4 py-4 flex flex-col items-center justify-center min-h-[82vh] relative select-text">
       {/* Session Diagnostics Header */}
       <div className="w-full max-w-2xl flex items-center justify-between mb-4 px-6 py-3 rounded-2xl bg-black/80 border border-white/15 backdrop-blur-2xl shadow-[0_10px_30px_rgba(0,0,0,0.8),inset_0_1px_1px_rgba(255,255,255,0.2)]">
         {/* Core Shield Meter */}

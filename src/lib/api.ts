@@ -2,7 +2,9 @@ import { Capacitor } from '@capacitor/core';
 
 // Canonical default backend URL for APK (can be overriden via SettingsModal or localStorage)
 const DEFAULT_DEPLOYED_BACKEND_URL =
-  (import.meta as any).env?.VITE_BACKEND_URL || 'https://ai.studio';
+  (import.meta as any).env?.VITE_BACKEND_URL ||
+  (import.meta as any).env?.APP_URL ||
+  '';
 
 export const getCustomBackendUrl = (): string => {
   if (typeof localStorage === 'undefined') return '';
@@ -66,7 +68,11 @@ export const getApiBaseUrl = (): string => {
     if (envBase && typeof envBase === 'string' && envBase.trim() !== '' && !envBase.includes('ais-dev')) {
       return envBase.replace(/\/+$/, '');
     }
-    return DEFAULT_DEPLOYED_BACKEND_URL.replace(/\/+$/, '');
+    if (DEFAULT_DEPLOYED_BACKEND_URL) {
+      return DEFAULT_DEPLOYED_BACKEND_URL.replace(/\/+$/, '');
+    }
+    // Fallback: prompt user to set backend URL in Settings if empty in APK
+    return 'https://ai.studio';
   }
 
   if (envBase && typeof envBase === 'string' && envBase.trim() !== '') {
