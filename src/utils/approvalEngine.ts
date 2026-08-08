@@ -229,6 +229,11 @@ export class ApprovalEngine {
     return [...this.receipts];
   }
 
+  public recordReceipt(receipt: CommitReceipt): void {
+    this.receipts.unshift(receipt);
+    this.saveProposals();
+  }
+
   // ==================================================
   // CODE PATCH PROPOSAL ENGINE
   // ==================================================

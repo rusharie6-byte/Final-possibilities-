@@ -13,6 +13,7 @@ import { registerPlugin } from '@capacitor/core';
 import { law9Firewall } from '../tools/Law9Firewall';
 import { crtEngine } from '../crt/CRTEngine';
 import { memoryStore } from '../utils/memoryStore';
+import { storageEngine } from '../utils/storageEngine';
 
 export interface ToolExecutionResult {
   toolName: string;
@@ -137,6 +138,13 @@ export class ToolExecutionBridge {
             uptimeSeconds: Math.floor(performance.now() / 1000),
             recentAuditTrail: auditLogs,
           }, null, 2);
+          break;
+        }
+
+        case 'export_vault_backup': {
+          const reasoning = args.reasoning || 'Creator requested manual vault export';
+          const success = storageEngine.exportVaultFileDownload();
+          stdout = `VAULT EXPORT EXECUTED SUCCESSFULLY:\nReasoning: ${reasoning}\nFile Status: Download file generated and dispatched to device downloads.`;
           break;
         }
 

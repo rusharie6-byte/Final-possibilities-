@@ -72,9 +72,25 @@ export const SYSTEM_DIAGNOSTICS_SCHEMA: ToolFunctionDeclaration = {
   },
 };
 
+export const EXPORT_VAULT_BACKUP_SCHEMA: ToolFunctionDeclaration = {
+  name: 'export_vault_backup',
+  description: 'Triggers a zero-knowledge export and file download of Possibilities memory vault to a local .vault file.',
+  parameters: {
+    type: 'OBJECT',
+    properties: {
+      reasoning: {
+        type: 'STRING',
+        description: 'Creator request or automated backup rationale.',
+      },
+    },
+    required: ['reasoning'],
+  },
+};
+
 export const POSSIBILITIES_SYSTEM_TOOLS: ToolFunctionDeclaration[] = [
   EXECUTE_SHELL_COMMAND_SCHEMA,
   READ_FILE_SCHEMA,
   WRITE_FILE_SCHEMA,
   SYSTEM_DIAGNOSTICS_SCHEMA,
+  EXPORT_VAULT_BACKUP_SCHEMA,
 ];

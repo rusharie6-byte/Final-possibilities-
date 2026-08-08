@@ -2,7 +2,7 @@ import { Capacitor } from '@capacitor/core';
 
 // Canonical deployed Cloud Run backend service URL for native APK environment
 const DEFAULT_DEPLOYED_BACKEND_URL =
-  'https://possibilities-shell.ai.studio';
+  (import.meta as any).env?.VITE_BACKEND_URL || 'https://ai.studio';
 
 /**
  * Detects whether the application is executing inside a Capacitor Native App (Android/iOS)
@@ -86,6 +86,31 @@ export const getApiEndpoint = (path: string): string => {
   return cleanPath;
 };
 
+export const getCustomGeminiApiKey = (): string => {
+  if (typeof localStorage === 'undefined') return '';
+  return localStorage.getItem('possibilities_custom_gemini_key') || '';
+};
+
+export const setCustomGeminiApiKey = (key: string): void => {
+  if (typeof localStorage === 'undefined') return;
+  if (!key || key.trim() === '') {
+    localStorage.removeItem('possibilities_custom_gemini_key');
+  } else {
+    localStorage.setItem('possibilities_custom_gemini_key', key.trim());
+  }
+};
+
+export const getGeminiApiHeaders = (): Record<string, string> => {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  const customKey = getCustomGeminiApiKey();
+  if (customKey) {
+    headers['x-gemini-api-key'] = customKey;
+  }
+  return headers;
+};
+
 export interface NetworkLogEntry {
   id: string;
   timestamp: string;
@@ -141,6 +166,18 @@ export const loggedFetch = async (
       : input.url;
 
   const method = init?.method || 'GET';
+  const customKey = getCustomGeminiApiKey();
+
+  // Merge custom API key header if available
+  let mergedInit = init ? { ...init } : {};
+  if (customKey && (urlString.includes('/api/gemini') || urlString.includes('/api/health'))) {
+    const existingHeaders = new Headers(mergedInit.headers || {});
+    if (!existingHeaders.has('x-gemini-api-key')) {
+      existingHeaders.set('x-gemini-api-key', customKey);
+    }
+    mergedInit.headers = existingHeaders;
+  }
+
   const startTime = Date.now();
   const id = `log_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
   const timestamp = new Date().toLocaleTimeString();
@@ -148,7 +185,7 @@ export const loggedFetch = async (
   console.log(`[NETWORK REQUEST] Method: ${method} | URL: ${urlString}`);
 
   try {
-    const response = await fetch(input, init);
+    const response = await fetch(input, mergedInit);
     const durationMs = Date.now() - startTime;
 
     // Clone response to read body without consuming original stream

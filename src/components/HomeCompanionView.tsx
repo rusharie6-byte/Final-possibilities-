@@ -15,12 +15,20 @@ import {
   VolumeX,
   X,
   MoreVertical,
+  Download,
+  Upload,
+  HardDrive,
+  FolderOpen,
+  ShieldCheck,
+  CheckCircle2,
+  Info,
 } from 'lucide-react';
 import { SystemMode } from '../types';
 import { AmbientParticlesCanvas } from './AmbientParticlesCanvas';
 import { audioSynth } from '../utils/audioSynthesizer';
 import { companionEngine } from '../utils/companionEngine';
 import { memoryStore } from '../utils/memoryStore';
+import { memoryVaultManager } from '../vault/MemoryVaultManager';
 import { getApiEndpoint, loggedFetch } from '../lib/api';
 
 const orbImageUrl = new URL('../assets/images/crystal_orb_asset_1785163496547.jpg', import.meta.url).href;
@@ -566,6 +574,115 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
     });
   }, []);
 
+  // 💾 Backup & Restore State & Refs
+  const [backupStatusNotice, setBackupStatusNotice] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Helper function to trigger browser blob download anchor
+  const triggerFileDownload = (content: string, filename: string) => {
+    const blob = new Blob([content], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  // Self Backup Handler: Exports encrypted vault to Android public storage AND lets user pick local/cloud location
+  const handleSelfBackup = async () => {
+    audioSynth.playNodeClick(600);
+    audioSynth.triggerHaptic([20, 20]);
+    setIsOptionsMenuOpen(false);
+    try {
+      const authKey = 'ARNO_ARIE_MASTER_KEY_2026';
+      
+      // 1. Export zero-knowledge encrypted vault to Android Public Documents (/Documents/Possibilities/Vault/)
+      const nativeResult = await memoryVaultManager.exportEncryptedVaultToStorage(authKey);
+
+      // 2. Export serialized payload for user choice download / cloud drive backup
+      const encryptedPayload = nativeResult.payload;
+      const jsonString = JSON.stringify(encryptedPayload, null, 2);
+      const filename = `possibilities_vault_${encryptedPayload.vaultId}.vault`;
+
+      // Check if File System Access API is supported (lets user pick exact target folder)
+      if ('showSaveFilePicker' in window) {
+        try {
+          const handle = await (window as any).showSaveFilePicker({
+            suggestedName: filename,
+            types: [{
+              description: 'Possibilities Encrypted Vault Backup',
+              accept: { 'application/json': ['.vault', '.json'] },
+            }],
+          });
+          const writable = await handle.createWritable();
+          await writable.write(jsonString);
+          await writable.close();
+        } catch (pickerErr: any) {
+          if (pickerErr.name !== 'AbortError') {
+            triggerFileDownload(jsonString, filename);
+          }
+        }
+      } else {
+        triggerFileDownload(jsonString, filename);
+      }
+
+      setBackupStatusNotice(
+        `Self Backup Created! Saved to Documents/Possibilities/Vault/ AND downloaded. Your memory WILL NOT be wiped if you uninstall and reinstall!`
+      );
+    } catch (err: any) {
+      console.error('Self backup error:', err);
+      setBackupStatusNotice(`Self Backup error: ${err.message}`);
+    }
+  };
+
+  // Upload / Restore Handler: Triggers file picker for user to select backup file
+  const handleTriggerUpload = () => {
+    audioSynth.playNodeClick(600);
+    setIsOptionsMenuOpen(false);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+      fileInputRef.current.click();
+    }
+  };
+
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    audioSynth.playNodeClick(700);
+    try {
+      const text = await file.text();
+      const authKey = 'ARNO_ARIE_MASTER_KEY_2026';
+
+      try {
+        const parsed = JSON.parse(text);
+        if (parsed.encryptedDataHex && parsed.ivHex && parsed.sha256Signature) {
+          // Decrypt .vault zero-knowledge payload
+          const decryptedJson = await memoryVaultManager.decryptVaultData(parsed, authKey);
+          const memoryObj = JSON.parse(decryptedJson);
+          memoryStore.importMemoryData(memoryObj);
+        } else {
+          // Plain JSON memory dump
+          memoryStore.importMemoryData(parsed);
+        }
+      } catch (parseErr: any) {
+        throw new Error('Invalid or corrupted vault file payload.');
+      }
+
+      const restoredCount = memoryStore.getCoreMemories().length;
+      setBackupStatusNotice(
+        `Memory Vault Restored! Successfully restored ${restoredCount} memory records from "${file.name}". Creator identity verified intact.`
+      );
+      audioSynth.playOrbPulse(200, 0.4);
+    } catch (err: any) {
+      console.error('Vault upload restore error:', err);
+      setBackupStatusNotice(`Upload & restore error: ${err.message}`);
+    }
+  };
+
   // Cleanup on Component Unmount
   useEffect(() => {
     return () => {
@@ -637,7 +754,7 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
       </div>
 
       {/* ──────────────────────────────────────────────────────────── */}
-      {/* TOP HEADER: SPEAKER, MIC, ORB HEALTH & MEMORY CONTROLS */}
+      {/* TOP HEADER: SPEAKER, MIC, ORB HEALTH & OPTIONS MENU */}
       {/* ──────────────────────────────────────────────────────────── */}
       <motion.div
         initial={{ opacity: 0, y: -10 }}
@@ -663,22 +780,6 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
             />
             <span className="hidden sm:inline">{isApiOnline ? 'ORB ALIVE' : 'ORB STABLE'}</span>
           </div>
-
-          {/* Quick Memory Access Badge */}
-          <button
-            onClick={() => {
-              audioSynth.playNodeClick(600);
-              onOpenPanel('memory');
-            }}
-            className="px-2.5 py-1.5 rounded-full bg-zinc-950/80 hover:bg-purple-950/80 text-purple-300 border border-purple-500/30 text-[11px] font-semibold flex items-center gap-1.5 transition-all backdrop-blur-xl"
-            title="Open Long Term Memory Vault"
-          >
-            <Brain className="w-3.5 h-3.5 text-purple-400" />
-            <span className="hidden sm:inline">MEMORY</span>
-            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-purple-900/60 border border-purple-400/30 text-purple-200">
-              {companionEngine.getLongTermMemories().length}
-            </span>
-          </button>
         </div>
 
         {/* OPTIONS MENU */}
@@ -717,12 +818,12 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.95, y: 8 }}
                   transition={{ duration: 0.15 }}
-                  className="absolute right-0 mt-2 w-64 p-3.5 rounded-2xl bg-zinc-950/95 border border-purple-500/40 backdrop-blur-2xl shadow-[0_20px_50px_rgba(0,0,0,0.95)] z-50 text-xs font-mono flex flex-col gap-2.5"
+                  className="absolute right-0 mt-2 w-72 p-3.5 rounded-2xl bg-zinc-950/95 border border-purple-500/40 backdrop-blur-2xl shadow-[0_20px_50px_rgba(0,0,0,0.95)] z-50 text-xs font-mono flex flex-col gap-2.5"
                 >
                   <div className="flex items-center justify-between pb-2 border-b border-purple-500/20 text-purple-300 font-bold tracking-wider">
                     <span className="flex items-center gap-1.5 text-[11px] uppercase">
                       <Sliders className="w-3.5 h-3.5 text-purple-400" />
-                      Option Controls
+                      Companion Controls
                     </span>
                     <button
                       onClick={() => setIsOptionsMenuOpen(false)}
@@ -732,7 +833,67 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
                     </button>
                   </div>
 
-                  {/* Option 1: Microphone Input Toggle */}
+                  {/* Option 1: Memory Vault Panel */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      audioSynth.playNodeClick(600);
+                      onOpenPanel('memory');
+                      setIsOptionsMenuOpen(false);
+                    }}
+                    className="flex items-center justify-between p-2.5 rounded-xl bg-purple-950/50 hover:bg-purple-900/70 border border-purple-500/30 text-purple-200 transition-all text-left"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Brain className="w-4 h-4 text-purple-400" />
+                      <div className="flex flex-col">
+                        <span className="font-semibold text-xs text-purple-100">Memory Vault</span>
+                        <span className="text-[9px] text-purple-300/60 font-sans">View & edit stored memory</span>
+                      </div>
+                    </div>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-900/80 border border-purple-400/40 text-purple-200 font-bold">
+                      {companionEngine.getLongTermMemories().length}
+                    </span>
+                  </button>
+
+                  {/* Option 2: Self Backup (Choose Location & Preserve Reinstall) */}
+                  <button
+                    type="button"
+                    onClick={handleSelfBackup}
+                    className="flex items-center justify-between p-2.5 rounded-xl bg-emerald-950/40 hover:bg-emerald-900/60 border border-emerald-500/30 text-emerald-200 transition-all text-left"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Download className="w-4 h-4 text-emerald-400" />
+                      <div className="flex flex-col">
+                        <span className="font-semibold text-xs text-emerald-100">Self Backup</span>
+                        <span className="text-[9px] text-emerald-300/60 font-sans">Export encrypted .vault file</span>
+                      </div>
+                    </div>
+                    <span className="text-[9px] px-2 py-0.5 rounded bg-emerald-900/80 text-emerald-200 font-bold uppercase tracking-wider">
+                      SAVE
+                    </span>
+                  </button>
+
+                  {/* Option 3: Upload Backup (Restore Memory) */}
+                  <button
+                    type="button"
+                    onClick={handleTriggerUpload}
+                    className="flex items-center justify-between p-2.5 rounded-xl bg-blue-950/40 hover:bg-blue-900/60 border border-blue-500/30 text-blue-200 transition-all text-left"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Upload className="w-4 h-4 text-blue-400" />
+                      <div className="flex flex-col">
+                        <span className="font-semibold text-xs text-blue-100">Upload Backup</span>
+                        <span className="text-[9px] text-blue-300/60 font-sans">Restore vault from device/drive</span>
+                      </div>
+                    </div>
+                    <span className="text-[9px] px-2 py-0.5 rounded bg-blue-900/80 text-blue-200 font-bold uppercase tracking-wider">
+                      RESTORE
+                    </span>
+                  </button>
+
+                  <div className="h-[1px] bg-purple-500/20 my-0.5" />
+
+                  {/* Option 4: Microphone Input Toggle */}
                   <button
                     type="button"
                     onClick={() => {
@@ -764,7 +925,7 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
                     </span>
                   </button>
 
-                  {/* Option 2: Voice Speaker Output Toggle */}
+                  {/* Option 5: Voice Speaker Output Toggle */}
                   <button
                     type="button"
                     onClick={() => {
@@ -796,7 +957,7 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
                     </span>
                   </button>
 
-                  {/* Option 3: Clear Chat Stream */}
+                  {/* Option 6: Clear Chat Stream */}
                   <button
                     type="button"
                     onClick={() => {
@@ -822,6 +983,35 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
           </AnimatePresence>
         </div>
       </motion.div>
+
+      {/* Hidden File Input for Vault Upload / Restore */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileUpload}
+        accept=".vault,.json"
+        className="hidden"
+      />
+
+      {/* Backup & Restore Status Notice Banner */}
+      {backupStatusNotice && (
+        <motion.div
+          initial={{ opacity: 0, y: -5 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="w-full max-w-xl mx-auto my-1.5 p-3 rounded-xl bg-emerald-950/95 border border-emerald-400/50 backdrop-blur-md shadow-lg flex items-center justify-between text-xs text-emerald-200 z-30"
+        >
+          <div className="flex items-center gap-2 pr-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <p className="leading-snug">{backupStatusNotice}</p>
+          </div>
+          <button
+            onClick={() => setBackupStatusNotice(null)}
+            className="px-2.5 py-1 text-[10px] font-bold rounded-md bg-emerald-800 hover:bg-emerald-700 text-white shrink-0 transition-all"
+          >
+            OK
+          </button>
+        </motion.div>
+      )}
 
       {/* Microphone Permission Notice Banner */}
       {micPermissionNotice && (

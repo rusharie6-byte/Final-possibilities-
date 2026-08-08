@@ -20,6 +20,12 @@ import {
   Flame,
   Clock,
   Compass,
+  Zap,
+  Filter,
+  Scissors,
+  HardDrive,
+  Database,
+  ArrowRight,
 } from 'lucide-react';
 import {
   PartnerProfile,
@@ -30,8 +36,9 @@ import {
 import { audioSynth } from '../utils/audioSynthesizer';
 import { companionEngine } from '../utils/companionEngine';
 import { approvalEngine } from '../utils/approvalEngine';
+import { timestampCapsuleEngine, TimestampCapsule, DistillationStats } from '../utils/timestampCapsuleEngine';
 
-type ActiveTab = 'profile' | 'context' | 'core' | 'reflection' | 'proposals';
+type ActiveTab = 'profile' | 'context' | 'capsules' | 'core' | 'reflection' | 'proposals';
 
 export const MemoryView: React.FC = () => {
   const [activeTab, setActiveTab] = useState<ActiveTab>('profile');
@@ -39,6 +46,11 @@ export const MemoryView: React.FC = () => {
   const [context, setContext] = useState<LivingContext>(companionEngine.getLivingContext());
   const [coreMemories, setCoreMemories] = useState<CoreMemoryItem[]>(companionEngine.getCoreMemories());
   const [reflectionLogs, setReflectionLogs] = useState<ReflectionLogEntry[]>(companionEngine.getReflectionLogs());
+
+  // Timestamp Capsules State
+  const [capsules, setCapsules] = useState<TimestampCapsule[]>(timestampCapsuleEngine.getCapsules());
+  const [distillStats, setDistillStats] = useState<DistillationStats>(timestampCapsuleEngine.getDistillationStats());
+  const [capsuleNotice, setCapsuleNotice] = useState<string | null>(null);
 
   // Proposals & Receipts
   const [memoryProposals, setMemoryProposals] = useState(approvalEngine.getAllMemoryWriteProposals());
@@ -71,6 +83,17 @@ export const MemoryView: React.FC = () => {
     setMemoryProposals([...approvalEngine.getAllMemoryWriteProposals()]);
     setCodeProposals([...approvalEngine.getAllProposals()]);
     setReceipts([...approvalEngine.getCommitReceipts()]);
+    setCapsules([...timestampCapsuleEngine.getCapsules()]);
+    setDistillStats({ ...timestampCapsuleEngine.getDistillationStats() });
+  };
+
+  const handleRunDistillationAndPrune = () => {
+    audioSynth.playNodeClick(750);
+    audioSynth.triggerHaptic([20, 40, 20]);
+    const result = timestampCapsuleEngine.distillAndConsolidate();
+    setCapsules([...result.capsules]);
+    setDistillStats({ ...timestampCapsuleEngine.getDistillationStats() });
+    setCapsuleNotice(result.message);
   };
 
   useEffect(() => {
@@ -231,6 +254,21 @@ export const MemoryView: React.FC = () => {
           >
             <Activity className="w-3.5 h-3.5" />
             <span>LIVING CONTEXT</span>
+          </button>
+
+          <button
+            onClick={() => {
+              audioSynth.playNodeClick(530);
+              setActiveTab('capsules');
+            }}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold tracking-wider transition-all flex items-center gap-1.5 whitespace-nowrap ${
+              activeTab === 'capsules'
+                ? 'bg-purple-600 text-white shadow-[0_0_15px_#A855F7]'
+                : 'text-purple-300/70 hover:text-purple-100 hover:bg-purple-950/40'
+            }`}
+          >
+            <Clock className="w-3.5 h-3.5 text-cyan-300" />
+            <span>CAPSULES & CLEANING ({capsules.length})</span>
           </button>
 
           <button
@@ -678,6 +716,309 @@ export const MemoryView: React.FC = () => {
                     <span className="text-purple-300/70">Current Emotion State:</span>
                     <span className="font-mono text-cyan-300 font-bold">{context.currentEmotions.join(' • ')}</span>
                   </div>
+                </div>
+              </div>
+            )}
+          </motion.div>
+        )}
+
+        {/* ======================================================== */}
+        {/* TIMESTAMP CAPSULES & MEMORY DISTILLATION ENGINE TAB */}
+        {/* ======================================================== */}
+        {activeTab === 'capsules' && (
+          <motion.div
+            key="tab-capsules"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="flex flex-col gap-6"
+          >
+            {/* Engine Banner & Execution Control */}
+            <div className="p-4 rounded-2xl bg-gradient-to-r from-purple-950/60 via-zinc-950 to-cyan-950/40 border border-purple-500/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 backdrop-blur-md shadow-xl">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-cyan-950/80 border border-cyan-400/50 flex items-center justify-center shadow-[0_0_20px_rgba(6,182,212,0.4)] shrink-0">
+                  <Clock className="w-5 h-5 text-cyan-300" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-sm font-bold text-white tracking-wide font-mono uppercase">
+                      TIMESTAMP CAPSULES & DISTILLATION ENGINE
+                    </h2>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-600/80 text-cyan-100 font-mono font-bold border border-cyan-400/40">
+                      NOISE-FREE COMPRESSION
+                    </span>
+                  </div>
+                  <p className="text-xs text-purple-300/80 tracking-wide mt-0.5">
+                    Organizes memories into chronological timestamp capsules. Distills essential details, strips filler chatter, and cleans up outdated unreferenced entries while permanently preserving Sacred Core Memory.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleRunDistillationAndPrune}
+                className="px-4 py-2 bg-gradient-to-r from-cyan-600 to-purple-600 hover:from-cyan-500 hover:to-purple-500 text-white text-xs font-bold font-mono rounded-xl shadow-[0_0_20px_rgba(6,182,212,0.5)] transition-all flex items-center gap-2 shrink-0 border border-cyan-300/40"
+              >
+                <Scissors className="w-4 h-4 text-cyan-100" />
+                <span>DISTILL & CLEAN OUTDATED MEMORY</span>
+              </button>
+            </div>
+
+            {/* Distillation & Clean-up Notice Banner */}
+            {capsuleNotice && (
+              <motion.div
+                initial={{ opacity: 0, y: -5 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="p-3.5 rounded-xl bg-emerald-950/90 border border-emerald-400/50 backdrop-blur-md flex items-center justify-between text-xs text-emerald-200"
+              >
+                <div className="flex items-center gap-2.5">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span className="font-mono">{capsuleNotice}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCapsuleNotice(null)}
+                  className="px-2.5 py-1 text-[10px] font-mono font-bold rounded-lg bg-emerald-800 hover:bg-emerald-700 text-white shrink-0"
+                >
+                  DISMISS
+                </button>
+              </motion.div>
+            )}
+
+                      {/* Key Metrics Stats Grid */}
+                      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 font-mono">
+                        <div className="p-3.5 rounded-2xl bg-black/80 border border-purple-500/30 flex flex-col gap-1">
+                          <span className="text-[10px] text-purple-400 uppercase tracking-wider">Timestamp Capsules</span>
+                          <div className="flex items-baseline gap-1.5">
+                            <span className="text-xl font-bold text-white">{distillStats.totalCapsules}</span>
+                            <span className="text-[10px] text-cyan-300">Capsules</span>
+                          </div>
+                        </div>
+
+                        <div className="p-3.5 rounded-2xl bg-black/80 border border-purple-500/30 flex flex-col gap-1">
+                          <span className="text-[10px] text-purple-400 uppercase tracking-wider">Cortical Nodes</span>
+                          <div className="flex items-baseline gap-1.5">
+                            <span className="text-xl font-bold text-emerald-300">{distillStats.totalSchemaNodes}</span>
+                            <span className="text-[10px] text-emerald-400/80">Triples</span>
+                          </div>
+                        </div>
+
+                        <div className="p-3.5 rounded-2xl bg-black/80 border border-purple-500/30 flex flex-col gap-1">
+                          <span className="text-[10px] text-purple-400 uppercase tracking-wider">Synaptic Retention</span>
+                          <div className="flex items-baseline gap-1.5">
+                            <span className="text-xl font-bold text-cyan-300">{(distillStats.averageSynapticStrength * 100).toFixed(0)}%</span>
+                            <span className="text-[10px] text-cyan-400">Ebbinghaus</span>
+                          </div>
+                        </div>
+
+                        <div className="p-3.5 rounded-2xl bg-black/80 border border-purple-500/30 flex flex-col gap-1">
+                          <span className="text-[10px] text-purple-400 uppercase tracking-wider">Outdated Pruned</span>
+                          <div className="flex items-baseline gap-1.5">
+                            <span className="text-xl font-bold text-amber-300">{distillStats.outdatedPrunedCount}</span>
+                            <span className="text-[10px] text-amber-400/80">LAW 0/11</span>
+                          </div>
+                        </div>
+
+                        <div className="p-3.5 rounded-2xl bg-black/80 border border-purple-500/30 flex flex-col gap-1">
+                          <span className="text-[10px] text-purple-400 uppercase tracking-wider">LAW 12 Audit Log</span>
+                          <div className="flex items-baseline gap-1.5">
+                            <span className="text-xl font-bold text-purple-300">{distillStats.law12AuditCount}</span>
+                            <span className="text-[10px] text-purple-400">Records</span>
+                          </div>
+                        </div>
+                      </div>
+
+            {/* Cortical Schema Nodes (Human Brain Knowledge Graph) */}
+            <div className="p-4 rounded-2xl bg-black/80 border border-cyan-500/30 flex flex-col gap-3 font-mono">
+              <div className="flex items-center justify-between border-b border-cyan-500/20 pb-2">
+                <div className="flex items-center gap-2">
+                  <Brain className="w-4 h-4 text-cyan-400" />
+                  <span className="text-xs font-bold text-white uppercase tracking-wider">
+                    CORTICAL SCHEMA NODES (HUMAN BRAIN SEMANTIC TRIPLES)
+                  </span>
+                </div>
+                <span className="text-[10px] px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 font-bold border border-cyan-500/30">
+                  {timestampCapsuleEngine.getSchemaNodes().length} Knowledge Triples
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {timestampCapsuleEngine.getSchemaNodes().map((node) => (
+                  <div
+                    key={node.nodeId}
+                    className="p-3 rounded-xl bg-zinc-950 border border-cyan-500/20 flex flex-col gap-1.5"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-purple-950 text-purple-300 font-bold border border-purple-500/30">
+                        {node.category}
+                      </span>
+                      <div className="flex items-center gap-1.5 text-[10px] text-cyan-300">
+                        <span>Synaptic: {(node.synapticStrength * 100).toFixed(0)}%</span>
+                        <div className="w-12 h-1.5 rounded-full bg-zinc-800 overflow-hidden">
+                          <div
+                            className="h-full bg-cyan-400 rounded-full"
+                            style={{ width: `${node.synapticStrength * 100}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="text-xs text-white font-sans flex items-center gap-1.5">
+                      <span className="text-cyan-300 font-bold font-mono">{node.subject}</span>
+                      <span className="text-purple-400 italic text-[11px] font-mono">{node.predicate}</span>
+                      <span className="text-emerald-300 font-bold font-mono">{node.object}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Capsules Timeline Container */}
+            <div className="flex flex-col gap-4">
+              <div className="flex items-center justify-between text-xs font-mono text-purple-300/80 px-1">
+                <span className="flex items-center gap-1.5">
+                  <Database className="w-3.5 h-3.5 text-purple-400" />
+                  CHRONOLOGICAL TIMESTAMP CAPSULES FEED
+                </span>
+                <span>Sorted by Recency & Sacred Status</span>
+              </div>
+
+              {capsules.length === 0 ? (
+                <div className="p-8 text-center rounded-2xl bg-black/60 border border-purple-500/20 text-xs text-purple-400 font-mono">
+                  No timestamp capsules built yet. Click "Distill & Clean Outdated Memory" above to consolidate memories.
+                </div>
+              ) : (
+                capsules.map((capsule) => (
+                  <div
+                    key={capsule.capsuleId}
+                    className={`p-4 rounded-2xl bg-zinc-950/80 border ${
+                      capsule.dateKey === 'sacred-core'
+                        ? 'border-amber-500/50 shadow-[0_0_25px_rgba(245,158,11,0.15)]'
+                        : 'border-purple-500/30'
+                    } flex flex-col gap-3 font-mono`}
+                  >
+                    {/* Capsule Header */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-purple-500/20">
+                      <div className="flex items-center gap-2">
+                        {capsule.dateKey === 'sacred-core' ? (
+                          <Lock className="w-4 h-4 text-amber-400" />
+                        ) : (
+                          <Clock className="w-4 h-4 text-cyan-400" />
+                        )}
+                        <span
+                          className={`text-sm font-bold tracking-wide ${
+                            capsule.dateKey === 'sacred-core' ? 'text-amber-300 font-sans' : 'text-white'
+                          }`}
+                        >
+                          {capsule.formattedDate}
+                        </span>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-900/60 text-purple-200 border border-purple-500/30">
+                          {capsule.details.length} Details
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2 text-[10px] text-purple-300/70">
+                        {capsule.spaceSavedPct > 0 && (
+                          <span className="px-2 py-0.5 rounded bg-cyan-950/80 border border-cyan-500/30 text-cyan-300 font-bold">
+                            {capsule.spaceSavedPct}% Noise Reduced
+                          </span>
+                        )}
+                        <span>Consolidated: {new Date(capsule.lastConsolidatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      </div>
+                    </div>
+
+                    {/* Capsule Details Feed */}
+                    <div className="grid grid-cols-1 gap-2.5">
+                      {capsule.details.map((detail) => (
+                        <div
+                          key={detail.id}
+                          className={`p-3 rounded-xl border transition-all ${
+                            detail.isSacred
+                              ? 'bg-amber-950/20 border-amber-500/30 hover:border-amber-400/50'
+                              : 'bg-black/60 border-purple-500/20 hover:border-purple-400/40'
+                          } flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3`}
+                        >
+                          <div className="flex flex-col gap-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span
+                                className={`text-[9px] uppercase px-1.5 py-0.2 rounded font-bold ${
+                                  detail.isSacred
+                                    ? 'bg-amber-500 text-black'
+                                    : 'bg-purple-900/80 text-purple-200 border border-purple-500/30'
+                                }`}
+                              >
+                                {detail.category}
+                              </span>
+                              <span className="text-[9px] px-1.5 py-0.2 rounded bg-cyan-950/80 text-cyan-300 font-bold border border-cyan-500/30">
+                                {detail.lawClassification}
+                              </span>
+                              <span className="text-[10px] text-purple-400">
+                                Importance: {(detail.importance * 100).toFixed(0)}%
+                              </span>
+                              <span className="text-[10px] text-emerald-400">
+                                Calibration: {(detail.calibrationRating * 100).toFixed(0)}%
+                              </span>
+                              <span className="text-[10px] text-cyan-400/80">
+                                Referenced {detail.referenceCount}x
+                              </span>
+                            </div>
+                            <p className="text-xs text-white font-sans leading-relaxed">
+                              {detail.summary}
+                            </p>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              audioSynth.playNodeClick(800);
+                              timestampCapsuleEngine.markMemoryReferenced(detail.id);
+                              refreshAllState();
+                            }}
+                            className="px-2.5 py-1 rounded bg-purple-950 hover:bg-purple-900 border border-purple-500/40 text-[10px] text-purple-300 hover:text-white shrink-0 transition-all font-mono"
+                            title="Simulate referencing this memory item in conversation under Law 11"
+                          >
+                            Mark Referenced
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* LAW 12 IMMUTABLE PRUNE AUDIT LEDGER */}
+            {timestampCapsuleEngine.getAuditLedger().length > 0 && (
+              <div className="p-4 rounded-2xl bg-black/90 border border-purple-500/30 flex flex-col gap-3 font-mono">
+                <div className="flex items-center justify-between border-b border-purple-500/20 pb-2">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-purple-400" />
+                    <span className="text-xs font-bold text-white uppercase tracking-wider">
+                      LAW 12 IMMUTABLE PRUNE AUDIT LEDGER
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-purple-400">
+                    {timestampCapsuleEngine.getAuditLedger().length} Records Preserved
+                  </span>
+                </div>
+
+                <div className="flex flex-col gap-2 max-h-48 overflow-y-auto pr-1">
+                  {timestampCapsuleEngine.getAuditLedger().map((record) => (
+                    <div
+                      key={record.auditId}
+                      className="p-2.5 rounded-xl bg-zinc-950 border border-purple-500/20 text-[11px] flex items-center justify-between gap-2"
+                    >
+                      <div className="flex items-center gap-2 truncate">
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-950 text-purple-300 font-bold border border-purple-500/30 shrink-0">
+                          {record.pruneReason}
+                        </span>
+                        <span className="text-zinc-300 truncate font-sans">{record.summarySnippet}</span>
+                      </div>
+                      <span className="text-[10px] text-zinc-500 shrink-0">
+                        {new Date(record.prunedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}

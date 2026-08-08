@@ -32,11 +32,19 @@ async function startServer() {
   const app = (0, import_express.default)();
   const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3e3;
   app.use((req, res, next) => {
-    res.header("Access-Control-Allow-Origin", "*");
-    res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE");
-    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+    const origin = req.headers.origin;
+    res.header("Access-Control-Allow-Origin", origin || "*");
+    res.header("Access-Control-Allow-Credentials", "true");
+    res.header(
+      "Access-Control-Allow-Methods",
+      "GET, POST, OPTIONS, PUT, DELETE, PATCH"
+    );
+    res.header(
+      "Access-Control-Allow-Headers",
+      "Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Capacitor-Platform, X-App-Version"
+    );
     if (req.method === "OPTIONS") {
-      return res.sendStatus(200);
+      return res.status(200).end();
     }
     next();
   });

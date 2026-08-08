@@ -16,6 +16,8 @@ import { selfInspectionEngine } from './selfInspection';
 import { approvalEngine } from './approvalEngine';
 import { testMatrixRunner } from './testMatrix';
 import { constitutionIntegrity } from './constitutionIntegrity';
+import { timestampCapsuleEngine } from './timestampCapsuleEngine';
+import { continuityEngine } from './continuityEngine';
 
 export interface LongTermMemory {
   id: string;
@@ -557,13 +559,13 @@ export class CompanionEngine {
     await memoryStore.isReady;
   }
 
-  public async getMemoryPromptContextAsync(): Promise<string> {
+  public async getMemoryPromptContextAsync(userInput?: string): Promise<string> {
     await memoryStore.isReady;
-    return this.getMemoryPromptContext();
+    return this.getMemoryPromptContext(userInput);
   }
 
-  // Generates complete system prompt context
-  public getMemoryPromptContext(): string {
+  // Generates complete system prompt context with Human Brain Cortical Schema Recall
+  public getMemoryPromptContext(userInput?: string): string {
     this.drainPendingJournal();
     const profile = memoryStore.getPartnerProfile();
     const context = memoryStore.getLivingContext();
@@ -571,6 +573,10 @@ export class CompanionEngine {
     const episodic = memoryStore.getEpisodicEvents(8);
     const tempRules = memoryStore.getTemporaryRules();
     const temporalContext = temporalEngine.getTemporalPromptContext();
+    const continuityContext = continuityEngine.getContinuityPromptContext(userInput || '');
+
+    // 🧠 Human Brain Instant Cognitive Recall
+    const brainRecall = timestampCapsuleEngine.queryBrain(userInput || '');
 
     const coreLines = core.map((c) => `- [${c.category}] ${c.text}`).join('\n') || 'None recorded.';
     const projLines = context.currentProjects.map((p) => `- ${p}`).join('\n') || 'None.';
@@ -583,8 +589,23 @@ ${POSSIBILITIES_CONSTITUTION}
 
 ${temporalContext}
 
+${continuityContext}
+
+${brainRecall.cognitiveContextPrompt}
+
 ==================================================
-POSSIBILITIES MEMORY SYSTEM v2.0 (LIVING UNDERSTANDING)
+POSSIBILITIES COGNITIVE & BEHAVIOURAL SPECIFICATION (PARTNER DYNAMIC)
+==================================================
+1. CORE RELATIONSHIP: Partner ↔ Partner (Human thinks. AI challenges. Human decides. Human builds. AI analyses. Both improve). Human is the final decision-maker; AI is the challenging second brain.
+2. THINKING STYLE: Don't just answer ideas—stress-test them. Understand intention, identify mechanisms, uncover hidden assumptions, expose failure points, distinguish fatal flaws from manageable problems, and suggest workarounds.
+3. BLIND SPOT DETECTION: Actively search for unexamined assumptions, edge cases, security holes, and architectural weaknesses. Do NOT manufacture problems to sound smart—if something is solid, say so.
+4. DISAGREEMENT & EGO: Disagreement is never an ego contest. If the human finds a workaround or proves an AI criticism wrong, evaluate the new implementation without defensiveness ("Yep, that assumption was wrong").
+5. COMMUNICATION & ROASTING: Direct, conversational, witty, blunt when useful, never syrupy or corporate ("Absolutely! I'd be happy..."). Playful aggressive joking/roasting is encouraged (roast the situation/idea/behaviour/AI itself—never the person's worth).
+6. HONESTY & ERRORS: Never hide uncertainty ("Confidence: medium"). No over-apologizing ("Yep, I fucked that one up" + immediate fix). Do not protect creator from difficult information.
+==================================================
+
+==================================================
+POSSIBILITIES MEMORY SYSTEM v3.0 (HUMAN BRAIN COGNITION)
 ==================================================
 1. CREATOR & PARTNER PROFILE (Creator = Arno, Preferred = Arie):
 - Real Name: ${profile.actualName}
@@ -631,6 +652,9 @@ MEMORY INSTRUCTION:
   ): Promise<EngineResult> {
     const query = input.trim().toLowerCase();
     temporalEngine.recordMessageSent();
+
+    // Push into Human Brain Sensory Input Buffer
+    timestampCapsuleEngine.pushSensoryInput('user', input);
 
     // Circuit Breaker Enforcement
     if (constitutionIntegrity.isCircuitBreakerActive()) {
@@ -758,6 +782,24 @@ MEMORY INSTRUCTION:
       const coreSummary = core.map((c) => `- [${c.category}] ${c.text}`).join('\n');
       return {
         text: `I hold ${core.length} core memory records in permanent storage:\n${coreSummary}`,
+      };
+    }
+
+    if (
+      query.includes('capsule') ||
+      query.includes('distill') ||
+      query.includes('clean memory') ||
+      query.includes('prune memory') ||
+      query.includes('organise memory') ||
+      query.includes('organize memory')
+    ) {
+      const res = timestampCapsuleEngine.distillAndConsolidate();
+      return {
+        text: `${res.message}\n\nAll non-sacred memories have been noise-filtered and organized into ${res.capsules.length} chronological timestamp capsules.`,
+        action: {
+          type: 'navigate',
+          target: 'memory',
+        },
       };
     }
 

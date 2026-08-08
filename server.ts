@@ -10,13 +10,23 @@ async function startServer() {
   const app = express();
   const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
-  // CORS and JSON middleware
+  // Explicit CORS and JSON middleware for Capacitor Native & Web origins
   app.use((req, res, next) => {
-    res.header("Access-Control-Allow-Origin", "*");
-    res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE");
-    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
-    if (req.method === 'OPTIONS') {
-      return res.sendStatus(200);
+    const origin = req.headers.origin;
+    // Allow any origin dynamically or fallback to '*'
+    res.header("Access-Control-Allow-Origin", origin || "*");
+    res.header("Access-Control-Allow-Credentials", "true");
+    res.header(
+      "Access-Control-Allow-Methods",
+      "GET, POST, OPTIONS, PUT, DELETE, PATCH"
+    );
+    res.header(
+      "Access-Control-Allow-Headers",
+      "Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Capacitor-Platform, X-App-Version"
+    );
+
+    if (req.method === "OPTIONS") {
+      return res.status(200).end();
     }
     next();
   });
@@ -24,7 +34,8 @@ async function startServer() {
 
   // Health check endpoint for API status
   app.get("/api/health", async (req, res) => {
-    const apiKey = process.env.GEMINI_API_KEY;
+    const clientKey = (req.headers['x-gemini-api-key'] as string) || (req.query?.apiKey as string);
+    const apiKey = (clientKey && clientKey.trim() !== '') ? clientKey.trim() : process.env.GEMINI_API_KEY;
     const geminiKeyPresent = Boolean(
       apiKey && apiKey !== "MY_GEMINI_API_KEY" && apiKey.trim() !== ""
     );
@@ -70,11 +81,13 @@ async function startServer() {
   // Server-side Gemini API endpoint
   app.post("/api/gemini", async (req, res) => {
     try {
-      const apiKey = process.env.GEMINI_API_KEY;
+      const clientKey = (req.headers['x-gemini-api-key'] as string) || req.body?.apiKey;
+      const apiKey = (clientKey && clientKey.trim() !== '') ? clientKey.trim() : process.env.GEMINI_API_KEY;
+
       if (!apiKey || apiKey === "MY_GEMINI_API_KEY" || apiKey.trim() === "") {
         // Graceful fallback response if API key is not configured yet
         return res.json({
-          text: "I am Possibilities, your intelligent living companion. (To enable full generative capacity, ensure GEMINI_API_KEY is set in your host environment variables). How can I assist your objectives today?",
+          text: "I am Possibilities, your intelligent living companion. (To enable full generative capacity, ensure GEMINI_API_KEY is set in client settings or host environment variables). How can I assist your objectives today?",
           fallback: true
         });
       }
@@ -148,6 +161,17 @@ async function startServer() {
                   reasoning: { type: "STRING", description: "Purpose of this modification" }
                 },
                 required: ["file_path", "content", "reasoning"]
+              }
+            },
+            {
+              name: "export_vault_backup",
+              description: "Triggers a zero-knowledge export and file download of Possibilities memory vault to a local .vault file.",
+              parameters: {
+                type: "OBJECT",
+                properties: {
+                  reasoning: { type: "STRING", description: "Creator request or automated backup rationale" }
+                },
+                required: ["reasoning"]
               }
             }
           ]

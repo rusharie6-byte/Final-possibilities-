@@ -58,6 +58,87 @@ export interface VaultPayload {
 export class StorageEngine {
   private filePath = PUBLIC_VAULT_STORAGE_KEY;
   private memVaultCache: string | null = null;
+  private idb: IDBDatabase | null = null;
+
+  constructor() {
+    this.requestPersistentStorage();
+    this.initIndexedDB();
+  }
+
+  // Request browser persistent storage to prevent eviction on low disk space
+  public async requestPersistentStorage(): Promise<boolean> {
+    if (typeof navigator !== 'undefined' && navigator.storage && typeof navigator.storage.persist === 'function') {
+      try {
+        const isPersisted = await navigator.storage.persisted();
+        if (!isPersisted) {
+          const granted = await navigator.storage.persist();
+          console.log(`[StorageEngine] Browser persistent storage granted: ${granted}`);
+          return granted;
+        }
+        return true;
+      } catch (err) {
+        console.warn('[StorageEngine] Error requesting persistent storage:', err);
+      }
+    }
+    return false;
+  }
+
+  // IndexedDB backup store initialization
+  private initIndexedDB(): Promise<IDBDatabase | null> {
+    if (typeof indexedDB === 'undefined') return Promise.resolve(null);
+    if (this.idb) return Promise.resolve(this.idb);
+
+    return new Promise((resolve) => {
+      try {
+        const req = indexedDB.open('possibilities_vault_db', 1);
+        req.onupgradeneeded = (e: any) => {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains('vault_store')) {
+            db.createObjectStore('vault_store');
+          }
+        };
+        req.onsuccess = (e: any) => {
+          this.idb = e.target.result;
+          resolve(this.idb);
+        };
+        req.onerror = () => resolve(null);
+      } catch {
+        resolve(null);
+      }
+    });
+  }
+
+  private async saveToIndexedDB(key: string, value: string): Promise<boolean> {
+    try {
+      const db = await this.initIndexedDB();
+      if (!db) return false;
+      return new Promise((resolve) => {
+        const tx = db.transaction('vault_store', 'readwrite');
+        const store = tx.objectStore('vault_store');
+        const req = store.put(value, key);
+        req.onsuccess = () => resolve(true);
+        req.onerror = () => resolve(false);
+      });
+    } catch {
+      return false;
+    }
+  }
+
+  private async readFromIndexedDB(key: string): Promise<string | null> {
+    try {
+      const db = await this.initIndexedDB();
+      if (!db) return null;
+      return new Promise((resolve) => {
+        const tx = db.transaction('vault_store', 'readonly');
+        const store = tx.objectStore('vault_store');
+        const req = store.get(key);
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => resolve(null);
+      });
+    } catch {
+      return null;
+    }
+  }
 
   private isNative(): boolean {
     try {
@@ -98,7 +179,7 @@ export class StorageEngine {
       const encrypted = encryptVault(jsonStr);
       this.memVaultCache = encrypted;
 
-      // Always update Web LocalStorage & cache fallback
+      // Always update Web LocalStorage, IndexedDB & cache fallback
       if (typeof localStorage !== 'undefined' && localStorage) {
         try {
           localStorage.setItem(this.filePath, encrypted);
@@ -106,6 +187,7 @@ export class StorageEngine {
           localStorage.setItem('possibilities_vault_last_backup', payload.updatedAt);
         } catch {}
       }
+      this.saveToIndexedDB(this.filePath, encrypted).catch(() => {});
 
       // If running on Native Android/iOS via Capacitor, write physical file to Documents directory
       if (this.isNative()) {
@@ -193,12 +275,15 @@ export class StorageEngine {
         }
       }
 
-      // Fallback to memory cache or LocalStorage if not retrieved natively or running in browser
+      // Fallback to memory cache, LocalStorage, or IndexedDB if not retrieved natively or running in browser
       if (!encrypted) {
         encrypted = this.memVaultCache;
       }
       if (!encrypted && typeof localStorage !== 'undefined') {
         encrypted = localStorage.getItem(this.filePath);
+      }
+      if (!encrypted) {
+        encrypted = await this.readFromIndexedDB(this.filePath);
       }
 
       if (!encrypted) return null;
@@ -209,6 +294,66 @@ export class StorageEngine {
       return parsed;
     } catch (e) {
       console.warn('Failed to decrypt or parse vault snapshot:', e);
+      return null;
+    }
+  }
+
+  // Trigger browser file download of encrypted or raw JSON vault file
+  public exportVaultFileDownload(customFilename?: string): boolean {
+    try {
+      const payload = this.readVaultSnapshot();
+      if (!payload) {
+        console.warn('[StorageEngine] No vault snapshot available to export.');
+        return false;
+      }
+
+      const jsonString = JSON.stringify(payload, null, 2);
+      const blob = new Blob([jsonString], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const dateStr = new Date().toISOString().split('T')[0];
+      a.href = url;
+      a.download = customFilename || `possibilities_vault_backup_${dateStr}.vault`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      console.log(`[StorageEngine] Exported physical vault file backup: ${a.download}`);
+      return true;
+    } catch (err) {
+      console.error('[StorageEngine] Export vault download failed:', err);
+      return false;
+    }
+  }
+
+  // Import uploaded vault file (supports raw JSON or base64 encrypted)
+  public async importVaultPayloadText(fileText: string): Promise<VaultPayload | null> {
+    try {
+      let payload: VaultPayload | null = null;
+      let cleanText = fileText.trim();
+
+      // Attempt parsing directly as raw JSON
+      try {
+        payload = JSON.parse(cleanText);
+      } catch {
+        // Fallback: try decrypting base64 string
+        try {
+          const decrypted = decryptVault(cleanText);
+          payload = JSON.parse(decrypted);
+        } catch (decErr) {
+          console.error('[StorageEngine] Failed to parse imported file text as JSON or base64:', decErr);
+          return null;
+        }
+      }
+
+      if (payload && payload.memoryData) {
+        await this.saveVaultSnapshotAsync(payload);
+        console.log('[StorageEngine] Successfully imported and restored vault payload.');
+        return payload;
+      }
+      return null;
+    } catch (err) {
+      console.error('[StorageEngine] Failed to import vault payload:', err);
       return null;
     }
   }

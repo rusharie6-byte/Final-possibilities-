@@ -18,6 +18,7 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        registerPlugin(PossibilitiesNativeBridge.class);
         super.onCreate(savedInstanceState);
 
         // Check startup permissions for Mic and Vault Storage Access
