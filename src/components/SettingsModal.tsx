@@ -144,21 +144,58 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                       <div className="text-[10px] text-purple-300/60">Target Cloud Run URL & Custom Gemini API Key for Android APK</div>
                     </div>
                   </div>
-                  <span className={`text-[10px] px-2.5 py-1 rounded-full uppercase font-bold ${apiKeyInput.trim() || backendUrlInput.trim() ? 'bg-purple-900/60 text-purple-200 border border-purple-500/40' : 'bg-zinc-900 text-zinc-400 border border-zinc-700'}`}>
-                    {backendUrlInput.trim() ? 'CUSTOM BACKEND' : 'DEFAULT HOST'}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    {(backendUrlInput.trim() || apiKeyInput.trim()) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setBackendUrlInput('');
+                          setApiKeyInput('');
+                          setCustomBackendUrl('');
+                          setCustomGeminiApiKey('');
+                          setKeyTestStatus('idle');
+                          setKeyMessage('Reset to built-in default host and server API key.');
+                          audioSynth.playNodeClick(700);
+                        }}
+                        className="text-[9px] px-2 py-0.5 rounded bg-rose-950/80 hover:bg-rose-900 text-rose-300 border border-rose-500/40 font-bold uppercase transition-all"
+                        title="Clear custom backend URL & key"
+                      >
+                        RESET DEFAULT
+                      </button>
+                    )}
+                    <span className={`text-[10px] px-2.5 py-1 rounded-full uppercase font-bold ${apiKeyInput.trim() || backendUrlInput.trim() ? 'bg-purple-900/60 text-purple-200 border border-purple-500/40' : 'bg-emerald-950/80 text-emerald-300 border border-emerald-500/40'}`}>
+                      {backendUrlInput.trim() ? 'CUSTOM BACKEND' : 'BUILT-IN HOST'}
+                    </span>
+                  </div>
                 </div>
 
-                <div className="flex flex-col gap-2">
+                <div className="flex flex-col gap-2.5">
                   <div className="flex flex-col gap-1">
-                    <label className="text-[10px] text-purple-300/80 uppercase font-bold">Cloud Run / Remote Backend URL (APK mode):</label>
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] text-purple-300/80 uppercase font-bold">Cloud Run / Remote Backend URL (APK mode):</label>
+                      {backendUrlInput && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setBackendUrlInput('');
+                            setCustomBackendUrl('');
+                          }}
+                          className="text-[9px] text-purple-400 hover:text-white underline"
+                        >
+                          Clear URL
+                        </button>
+                      )}
+                    </div>
                     <input
                       type="text"
                       value={backendUrlInput}
                       onChange={(e) => setBackendUrlInput(e.target.value)}
-                      placeholder="https://possibilities-shell.ai.studio (Optional)"
-                      className="bg-black border border-purple-500/30 rounded-xl px-3 py-2 text-xs text-white placeholder-purple-400/40 focus:outline-none focus:border-purple-400"
+                      placeholder="Leave blank for web preview (e.g. https://your-app.run.app for APK)"
+                      className="bg-black border border-purple-500/30 rounded-xl px-3 py-2 text-xs text-white placeholder-purple-400/40 focus:outline-none focus:border-purple-400 font-sans"
                     />
+                    <span className="text-[10px] text-purple-300/70 leading-normal">
+                      💡 <strong>Web Browser / Preview</strong>: Leave blank! The app connects directly to the built-in server. Only fill this in if you compiled the app as an Android APK.
+                    </span>
                   </div>
 
                   <div className="flex flex-col gap-1">
@@ -168,10 +205,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                         type="password"
                         value={apiKeyInput}
                         onChange={(e) => setApiKeyInput(e.target.value)}
-                        placeholder="Enter AIZaSy... custom key (optional)"
-                        className="flex-1 bg-black border border-purple-500/30 rounded-xl px-3 py-2 text-xs text-white placeholder-purple-400/40 focus:outline-none focus:border-purple-400"
+                        placeholder="Leave blank to use server key, or paste AIZaSy..."
+                        className="flex-1 bg-black border border-purple-500/30 rounded-xl px-3 py-2 text-xs text-white placeholder-purple-400/40 focus:outline-none focus:border-purple-400 font-sans"
                       />
                       <button
+                        type="button"
                         onClick={handleSaveAndTestKey}
                         disabled={keyTestStatus === 'testing'}
                         className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-bold text-xs uppercase transition-all shadow-[0_0_12px_#A855F7]"
@@ -179,6 +217,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                         {keyTestStatus === 'testing' ? 'TESTING...' : 'SAVE & TEST'}
                       </button>
                     </div>
+                    <span className="text-[10px] text-purple-300/70 leading-normal">
+                      💡 <strong>Gemini Key</strong>: Optional. Leave blank to use the app's server-side key automatically, or enter your personal Gemini key from Google AI Studio.
+                    </span>
                   </div>
                 </div>
 

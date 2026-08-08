@@ -94,6 +94,11 @@ export const getApiBaseUrl = (): string => {
 export const getApiEndpoint = (path: string): string => {
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
 
+  const customBackend = getCustomBackendUrl();
+  if (customBackend) {
+    return `${customBackend.replace(/\/+$/, '')}${cleanPath}`;
+  }
+
   if (isCapacitorNative()) {
     const base = getApiBaseUrl();
     return `${base}${cleanPath}`;
