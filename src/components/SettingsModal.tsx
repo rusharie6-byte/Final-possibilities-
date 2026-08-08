@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Sliders, X, ShieldCheck, Database, Cpu, Gauge, Key, HardDrive, CheckCircle2, AlertCircle } from 'lucide-react';
 import { audioSynth } from '../utils/audioSynthesizer';
 import { perfManager, PerformanceSetting } from '../utils/performance';
-import { getCustomGeminiApiKey, setCustomGeminiApiKey, getApiEndpoint, loggedFetch } from '../lib/api';
+import { getCustomGeminiApiKey, setCustomGeminiApiKey, getCustomBackendUrl, setCustomBackendUrl, getApiEndpoint, loggedFetch } from '../lib/api';
 import { AppLifecycleBackupModal } from './AppLifecycleBackupModal';
 
 interface SettingsModalProps {
@@ -16,8 +16,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [effectiveMode, setEffectiveMode] = useState<'high' | 'low'>(perfManager.getEffectiveMode());
   const [fps, setFps] = useState<number>(perfManager.getFps());
 
-  // API Key State
+  // API Key & Backend URL State
   const [apiKeyInput, setApiKeyInput] = useState<string>(getCustomGeminiApiKey());
+  const [backendUrlInput, setBackendUrlInput] = useState<string>(getCustomBackendUrl());
   const [keyTestStatus, setKeyTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const [keyMessage, setKeyMessage] = useState<string>('');
 
@@ -35,9 +36,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
   const handleSaveAndTestKey = async () => {
     const cleanKey = apiKeyInput.trim();
+    const cleanUrl = backendUrlInput.trim();
     setCustomGeminiApiKey(cleanKey);
+    setCustomBackendUrl(cleanUrl);
     setKeyTestStatus('testing');
-    setKeyMessage('Testing Gemini API key connection...');
+    setKeyMessage('Testing API connection...');
     audioSynth.playOrbPulse(600, 0.2);
 
     try {
@@ -52,11 +55,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
       if (data.geminiConnection === 'success' || data.geminiKeyPresent) {
         setKeyTestStatus('success');
-        setKeyMessage(cleanKey ? 'Custom Gemini API Key verified & saved! Responses active.' : 'Default host GEMINI_API_KEY verified active.');
+        setKeyMessage(cleanKey ? 'Custom Gemini API Key & Backend verified! AI features active.' : 'Backend connection verified active!');
         audioSynth.playNodeClick(1000);
       } else {
         setKeyTestStatus('error');
-        setKeyMessage('Key saved locally, but live test failed. Please verify key string.');
+        setKeyMessage('Settings saved locally, but server health check failed. Verify backend URL or key.');
       }
     } catch (err: any) {
       setKeyTestStatus('error');
@@ -131,36 +134,52 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 </div>
               </div>
 
-              {/* Gemini API Key Section */}
+              {/* Gemini API Key & Backend Service URL Section */}
               <div className="p-4 rounded-2xl bg-purple-950/20 border border-purple-500/30 flex flex-col gap-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <Key className="w-5 h-5 text-purple-400" />
                     <div>
-                      <div className="font-bold text-white">Custom Gemini API Key</div>
-                      <div className="text-[10px] text-purple-300/60">Saved locally & attached to server-side /api/gemini proxy calls</div>
+                      <div className="font-bold text-white">APK Remote Backend & Gemini Key</div>
+                      <div className="text-[10px] text-purple-300/60">Target Cloud Run URL & Custom Gemini API Key for Android APK</div>
                     </div>
                   </div>
-                  <span className={`text-[10px] px-2.5 py-1 rounded-full uppercase font-bold ${apiKeyInput.trim() ? 'bg-purple-900/60 text-purple-200 border border-purple-500/40' : 'bg-zinc-900 text-zinc-400 border border-zinc-700'}`}>
-                    {apiKeyInput.trim() ? 'CUSTOM KEY' : 'HOST ENV KEY'}
+                  <span className={`text-[10px] px-2.5 py-1 rounded-full uppercase font-bold ${apiKeyInput.trim() || backendUrlInput.trim() ? 'bg-purple-900/60 text-purple-200 border border-purple-500/40' : 'bg-zinc-900 text-zinc-400 border border-zinc-700'}`}>
+                    {backendUrlInput.trim() ? 'CUSTOM BACKEND' : 'DEFAULT HOST'}
                   </span>
                 </div>
 
-                <div className="flex gap-2">
-                  <input
-                    type="password"
-                    value={apiKeyInput}
-                    onChange={(e) => setApiKeyInput(e.target.value)}
-                    placeholder="Enter AIZaSy... custom key (optional)"
-                    className="flex-1 bg-black border border-purple-500/30 rounded-xl px-3 py-2 text-xs text-white placeholder-purple-400/40 focus:outline-none focus:border-purple-400"
-                  />
-                  <button
-                    onClick={handleSaveAndTestKey}
-                    disabled={keyTestStatus === 'testing'}
-                    className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-bold text-xs uppercase transition-all shadow-[0_0_12px_#A855F7]"
-                  >
-                    {keyTestStatus === 'testing' ? 'TESTING...' : 'SAVE & TEST KEY'}
-                  </button>
+                <div className="flex flex-col gap-2">
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[10px] text-purple-300/80 uppercase font-bold">Cloud Run / Remote Backend URL (APK mode):</label>
+                    <input
+                      type="text"
+                      value={backendUrlInput}
+                      onChange={(e) => setBackendUrlInput(e.target.value)}
+                      placeholder="https://possibilities-shell.ai.studio (Optional)"
+                      className="bg-black border border-purple-500/30 rounded-xl px-3 py-2 text-xs text-white placeholder-purple-400/40 focus:outline-none focus:border-purple-400"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[10px] text-purple-300/80 uppercase font-bold">Custom Gemini API Key:</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="password"
+                        value={apiKeyInput}
+                        onChange={(e) => setApiKeyInput(e.target.value)}
+                        placeholder="Enter AIZaSy... custom key (optional)"
+                        className="flex-1 bg-black border border-purple-500/30 rounded-xl px-3 py-2 text-xs text-white placeholder-purple-400/40 focus:outline-none focus:border-purple-400"
+                      />
+                      <button
+                        onClick={handleSaveAndTestKey}
+                        disabled={keyTestStatus === 'testing'}
+                        className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-bold text-xs uppercase transition-all shadow-[0_0_12px_#A855F7]"
+                      >
+                        {keyTestStatus === 'testing' ? 'TESTING...' : 'SAVE & TEST'}
+                      </button>
+                    </div>
+                  </div>
                 </div>
 
                 {keyMessage && (
@@ -210,7 +229,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 <div className="flex items-center gap-3">
                   <Cpu className="w-5 h-5 text-purple-400" />
                   <div>
-                    <div className="font-bold text-white">Gemini 2.5 Flash Integration</div>
+                    <div className="font-bold text-white">Gemini 3.6 Flash Engine</div>
                     <div className="text-[10px] text-purple-300/60">Server-Side Proxy via /api/gemini</div>
                   </div>
                 </div>

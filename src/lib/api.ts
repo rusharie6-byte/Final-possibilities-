@@ -1,8 +1,22 @@
 import { Capacitor } from '@capacitor/core';
 
-// Canonical deployed Cloud Run backend service URL for native APK environment
+// Canonical default backend URL for APK (can be overriden via SettingsModal or localStorage)
 const DEFAULT_DEPLOYED_BACKEND_URL =
   (import.meta as any).env?.VITE_BACKEND_URL || 'https://ai.studio';
+
+export const getCustomBackendUrl = (): string => {
+  if (typeof localStorage === 'undefined') return '';
+  return localStorage.getItem('possibilities_custom_backend_url') || '';
+};
+
+export const setCustomBackendUrl = (url: string): void => {
+  if (typeof localStorage === 'undefined') return;
+  if (!url || url.trim() === '') {
+    localStorage.removeItem('possibilities_custom_backend_url');
+  } else {
+    localStorage.setItem('possibilities_custom_backend_url', url.trim().replace(/\/+$/, ''));
+  }
+};
 
 /**
  * Detects whether the application is executing inside a Capacitor Native App (Android/iOS)
@@ -38,6 +52,11 @@ export const isCapacitorNative = (): boolean => {
  * - On Web Browser: Uses relative origin or explicit VITE_BACKEND_URL.
  */
 export const getApiBaseUrl = (): string => {
+  const customBackend = getCustomBackendUrl();
+  if (customBackend) {
+    return customBackend;
+  }
+
   const envBase =
     (import.meta as any).env?.VITE_BACKEND_URL ||
     (import.meta as any).env?.VITE_API_BASE_URL;
