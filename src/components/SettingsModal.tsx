@@ -52,7 +52,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
     try {
       const res = await loggedFetch('/api/health?checkGemini=true');
-      const data = await res.json();
+      const text = await res.text();
+      let data: any = {};
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error('Backend returned HTML or non-JSON response. Ensure Cloud Run / Backend URL is empty for Web Preview.');
+      }
+
       if (res.ok || data.status === 'ok') {
         setKeyTestStatus('success');
         setKeyMessage('Successfully reconnected! Possibilities built-in host is ONLINE.');
@@ -83,7 +90,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       }
 
       const res = await loggedFetch(url, { method: 'GET', headers });
-      const data = await res.json();
+      const text = await res.text();
+      let data: any = {};
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error('Server returned HTML instead of JSON. Leave "Cloud Run / Remote Backend URL" blank when testing in browser preview.');
+      }
 
       if (res.ok || data.status === 'ok' || data.geminiConnection === 'success' || data.geminiKeyPresent) {
         setKeyTestStatus('success');
