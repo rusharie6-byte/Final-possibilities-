@@ -8,7 +8,7 @@ import { MissionsView } from './components/MissionsView';
 import { ChatView } from './components/ChatView';
 import { MemoryView } from './components/MemoryView';
 import { CommandCenterView } from './components/CommandCenterView';
-import { OrbDefenseView } from './components/OrbDefenseView';
+import { LivePreviewStageView } from './components/LivePreviewStageView';
 import { AmbientParticlesCanvas } from './components/AmbientParticlesCanvas';
 import { SearchOverlay } from './components/SearchOverlay';
 import { SettingsModal } from './components/SettingsModal';
@@ -51,7 +51,7 @@ export default function App() {
 
   const isFeatureOverlay =
     activeOverlay &&
-    ['brain', 'missions', 'chat', 'memory', 'commandCenter', 'orbDefense'].includes(activeOverlay);
+    ['brain', 'missions', 'chat', 'memory', 'commandCenter', 'livePreviewStage'].includes(activeOverlay);
 
   return (
     <div className="min-h-screen min-h-[100dvh] w-full bg-[#030008] text-purple-100 flex flex-col font-sans selection:bg-purple-600 selection:text-white overflow-x-hidden relative">
@@ -146,6 +146,9 @@ export default function App() {
                     {activeOverlay === 'brain' && <BrainView />}
                     {activeOverlay === 'missions' && <MissionsView />}
                     {activeOverlay === 'chat' && <ChatView />}
+                    {activeOverlay === 'livePreviewStage' && (
+                      <LivePreviewStageView onClose={handleCloseOverlay} />
+                    )}
                     {activeOverlay === 'memory' && <MemoryView />}
                     {activeOverlay === 'commandCenter' && (
                       <CommandCenterView
@@ -153,7 +156,6 @@ export default function App() {
                         onModeChange={(mode) => setSystemMode(mode)}
                       />
                     )}
-                    {activeOverlay === 'orbDefense' && <OrbDefenseView />}
                   </div>
                 </div>
               </motion.div>

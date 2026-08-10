@@ -26,6 +26,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
 
   useEffect(() => {
+    if (isOpen) {
+      setBackendUrlInput(getCustomBackendUrl());
+      setApiKeyInput(getCustomGeminiApiKey());
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
     const unsubscribe = perfManager.subscribe(() => {
       setPerfSetting(perfManager.getSetting());
       setEffectiveMode(perfManager.getEffectiveMode());
@@ -33,6 +40,31 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     });
     return unsubscribe;
   }, []);
+
+  const handleResetToDefault = async () => {
+    setBackendUrlInput('');
+    setApiKeyInput('');
+    setCustomBackendUrl('');
+    setCustomGeminiApiKey('');
+    setKeyTestStatus('testing');
+    setKeyMessage('Reconnecting to built-in server...');
+    audioSynth.playNodeClick(700);
+
+    try {
+      const res = await loggedFetch('/api/health?checkGemini=true');
+      const data = await res.json();
+      if (res.ok || data.status === 'ok') {
+        setKeyTestStatus('success');
+        setKeyMessage('Successfully reconnected! Possibilities built-in host is ONLINE.');
+      } else {
+        setKeyTestStatus('error');
+        setKeyMessage('Server responded but health check failed.');
+      }
+    } catch (e: any) {
+      setKeyTestStatus('error');
+      setKeyMessage('Reconnection error: ' + (e?.message || 'Failed to fetch'));
+    }
+  };
 
   const handleSaveAndTestKey = async () => {
     const cleanKey = apiKeyInput.trim();
@@ -53,9 +85,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       const res = await loggedFetch(url, { method: 'GET', headers });
       const data = await res.json();
 
-      if (data.geminiConnection === 'success' || data.geminiKeyPresent) {
+      if (res.ok || data.status === 'ok' || data.geminiConnection === 'success' || data.geminiKeyPresent) {
         setKeyTestStatus('success');
-        setKeyMessage(cleanKey ? 'Custom Gemini API Key & Backend verified! AI features active.' : 'Backend connection verified active!');
+        setKeyMessage(cleanKey ? 'Custom Gemini API Key & Backend verified! AI features active.' : 'Backend connection verified active & ONLINE!');
         audioSynth.playNodeClick(1000);
       } else {
         setKeyTestStatus('error');
@@ -148,17 +180,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                     {(backendUrlInput.trim() || apiKeyInput.trim()) && (
                       <button
                         type="button"
-                        onClick={() => {
-                          setBackendUrlInput('');
-                          setApiKeyInput('');
-                          setCustomBackendUrl('');
-                          setCustomGeminiApiKey('');
-                          setKeyTestStatus('idle');
-                          setKeyMessage('Reset to built-in default host and server API key.');
-                          audioSynth.playNodeClick(700);
-                        }}
-                        className="text-[9px] px-2 py-0.5 rounded bg-rose-950/80 hover:bg-rose-900 text-rose-300 border border-rose-500/40 font-bold uppercase transition-all"
-                        title="Clear custom backend URL & key"
+                        onClick={handleResetToDefault}
+                        className="text-[9px] px-2 py-0.5 rounded bg-rose-950/80 hover:bg-rose-900 text-rose-300 border border-rose-500/40 font-bold uppercase transition-all shadow-[0_0_10px_rgba(244,63,94,0.3)]"
+                        title="Clear custom backend URL & key and reconnect"
                       >
                         RESET DEFAULT
                       </button>

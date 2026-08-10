@@ -99,7 +99,7 @@ export class ContinuityEngine {
           id: 'proc_error_handling',
           type: 'procedural',
           subject: 'Error Response & Apology Rule',
-          content: 'No empty or syrupy apologies. Direct acknowledgment of mistake + root cause analysis + immediate fix ("Yep, I fucked that one up").',
+          content: 'No empty or syrupy apologies. Direct acknowledgment of mistake + root cause analysis + immediate fix ("Yep, I made a mistake on that").',
           entities: ['Possibilities'],
           topics: ['error_handling', 'honesty'],
           createdAt: new Date().toISOString(),

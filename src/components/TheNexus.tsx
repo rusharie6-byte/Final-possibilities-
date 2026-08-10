@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { Brain, Compass, MessageSquareCode, History, Sliders, ShieldAlert, ChevronRight } from 'lucide-react';
+import { Brain, Compass, MessageSquareCode, History, Sliders, ChevronRight, Tv } from 'lucide-react';
 import { NexusSectionId, NexusNodeConfig } from '../types';
 import { audioSynth } from '../utils/audioSynthesizer';
 
@@ -19,10 +19,18 @@ const NEXUS_SECTIONS: NexusNodeConfig[] = [
     accentColor: '#C084FC',
   },
   {
+    id: 'livePreviewStage',
+    label: 'LIVE PREVIEW STAGE',
+    sublabel: 'Universal Execution Stage',
+    angle: 60,
+    iconName: 'Tv',
+    accentColor: '#F43F5E',
+  },
+  {
     id: 'missions',
     label: 'MISSIONS',
     sublabel: 'Strategic Directives',
-    angle: 60, // Top Right
+    angle: 120,
     iconName: 'Compass',
     accentColor: '#A855F7',
   },
@@ -30,7 +38,7 @@ const NEXUS_SECTIONS: NexusNodeConfig[] = [
     id: 'chat',
     label: 'CHAT',
     sublabel: 'Intelligent Companion',
-    angle: 120, // Bottom Right
+    angle: 180,
     iconName: 'MessageSquareCode',
     accentColor: '#38BDF8',
   },
@@ -38,7 +46,7 @@ const NEXUS_SECTIONS: NexusNodeConfig[] = [
     id: 'memory',
     label: 'MEMORY',
     sublabel: 'Temporal Knowledge Vault',
-    angle: 180, // Bottom
+    angle: 240,
     iconName: 'History',
     accentColor: '#E879F9',
   },
@@ -46,17 +54,9 @@ const NEXUS_SECTIONS: NexusNodeConfig[] = [
     id: 'commandCenter',
     label: 'COMMAND CENTER',
     sublabel: 'System Diagnostics',
-    angle: 225, // Bottom Left
+    angle: 300,
     iconName: 'Sliders',
     accentColor: '#34D399',
-  },
-  {
-    id: 'orbDefense',
-    label: 'ORB DEFENSE',
-    sublabel: 'Core Protection Protocol',
-    angle: 270, // 270° Left - REQUIRED SPEC
-    iconName: 'ShieldAlert',
-    accentColor: '#F43F5E',
   },
 ];
 
@@ -80,8 +80,8 @@ export const TheNexus: React.FC<TheNexusProps> = ({ onSelectSection, onCollapseN
         return <History {...props} />;
       case 'Sliders':
         return <Sliders {...props} />;
-      case 'ShieldAlert':
-        return <ShieldAlert {...props} />;
+      case 'Tv':
+        return <Tv {...props} />;
       default:
         return <Brain {...props} />;
     }

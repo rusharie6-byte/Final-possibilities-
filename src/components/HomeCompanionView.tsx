@@ -23,9 +23,27 @@ import {
   CheckCircle2,
   Info,
   Settings,
+  WifiOff,
+  RefreshCw,
+  Image as ImageIcon,
+  Wand2,
+  Video,
+  Code2,
+  Layers,
+  Sparkles as SparklesIcon,
+  Search,
+  Bot,
+  Palette,
+  Film,
+  Music,
+  FileText,
+  Gamepad2,
+  Package,
 } from 'lucide-react';
-import { SystemMode } from '../types';
+import { SystemMode, MediaAttachment } from '../types';
 import { AmbientParticlesCanvas } from './AmbientParticlesCanvas';
+import { AiCreationStudioModal, StudioTabType } from './AiCreationStudioModal';
+import { MediaAttachmentCard } from './MediaAttachmentCard';
 import { audioSynth } from '../utils/audioSynthesizer';
 import { companionEngine } from '../utils/companionEngine';
 import { memoryStore } from '../utils/memoryStore';
@@ -44,20 +62,10 @@ interface ChatMsg {
   sender: 'user' | 'possibilities';
   text: string;
   timestamp: string;
+  mediaAttachments?: MediaAttachment[];
 }
 
 const CHAT_HISTORY_STORAGE_KEY = 'possibilities_chat_history_v1';
-
-// Spontaneous thoughts pool that Possibilities naturally expresses beside the Partner
-const SPONTANEOUS_THOUGHTS = [
-  "Remember to finish packing.",
-  "Trailer measurements still need checking.",
-  "Call your uncle tonight.",
-  "Remember to phone Client #1.",
-  "Trailer project can wait until tonight.",
-  "Take a deep breath. I'm right here.",
-  "Focus on what brings clarity today.",
-];
 
 // Browser helper for SpeechRecognition compatibility
 const getSpeechRecognitionClass = (): any => {
@@ -80,6 +88,22 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
 
   // 🔮 POSSIBILITIES Voice Output Toggle (Speaker ON / OFF)
   const [isPossibilitiesVoiceOn, setIsPossibilitiesVoiceOn] = useState(true);
+
+  // AI Creation Studio Modal state
+  const [isStudioOpen, setIsStudioOpen] = useState(false);
+  const [studioTab, setStudioTab] = useState<StudioTabType>('image');
+
+  const handleStudioSendToChat = (attachment: MediaAttachment, userMsgText: string) => {
+    audioSynth.playEnergyBloom();
+    const newMsg: ChatMsg = {
+      id: `studio-${Date.now()}`,
+      sender: 'possibilities',
+      text: userMsgText,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      mediaAttachments: [attachment],
+    };
+    setMessages((prev) => [...prev, newMsg]);
+  };
 
   // 🌐 API Health State (Online = Orb Alive with breathing motion; Offline = Orb Stable)
   const [isApiOnline, setIsApiOnline] = useState<boolean>(true);
@@ -127,20 +151,21 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
+          // Filter out legacy saved initial greetings so conversation starts clean with user messages
+          const cleaned = parsed.filter(
+            (m) =>
+              m.id !== 'init-1' &&
+              m.id !== 'msg-1' &&
+              !m.text.includes('Possibilities is present') &&
+              !m.text.includes("What's on your mind")
+          );
+          return cleaned;
         }
       }
     } catch (e) {
       // ignore
     }
-    return [
-      {
-        id: 'init-1',
-        sender: 'possibilities',
-        text: "Possibilities is present, partner. What's on your mind?",
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      },
-    ];
+    return [];
   });
 
   // Save conversation messages to localStorage whenever messages state updates
@@ -154,16 +179,8 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
     }
   }, [messages]);
 
-  // 💭 Spontaneous Reminder Thought (Floats naturally, fades after 15s, rotates every ~32s)
-  const [spontaneousThought, setSpontaneousThought] = useState<{
-    text: string;
-    id: number;
-    posClass: string;
-  } | null>(null);
-
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const transcriptBufferRef = useRef<string>('');
-  const reminderIndexRef = useRef<number>(0);
 
   // Speech Recognition Persistence & Safety Refs
   const recognitionRef = useRef<any>(null);
@@ -202,51 +219,6 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isProcessing]);
-
-  // Periodic Spontaneous Thoughts Engine
-  useEffect(() => {
-    let fadeTimer: ReturnType<typeof setTimeout> | null = null;
-
-    const triggerThought = () => {
-      const text = SPONTANEOUS_THOUGHTS[reminderIndexRef.current % SPONTANEOUS_THOUGHTS.length];
-      reminderIndexRef.current += 1;
-
-      const positions = [
-        '-top-16 -left-6 sm:-left-16',
-        '-top-16 -right-6 sm:-right-16',
-        'top-1/3 -left-10 sm:-left-24',
-        'top-1/3 -right-10 sm:-right-24',
-        '-bottom-12 -left-4 sm:-left-12',
-        '-bottom-12 -right-4 sm:-right-12',
-      ];
-      const posClass = positions[Math.floor(Math.random() * positions.length)];
-
-      setSpontaneousThought({
-        text,
-        id: Date.now(),
-        posClass,
-      });
-
-      if (fadeTimer) clearTimeout(fadeTimer);
-      fadeTimer = setTimeout(() => {
-        setSpontaneousThought((curr) => (curr && curr.text === text ? null : curr));
-      }, 15000);
-    };
-
-    const initialDelay = setTimeout(() => {
-      triggerThought();
-    }, 12000);
-
-    const interval = setInterval(() => {
-      triggerThought();
-    }, 32000);
-
-    return () => {
-      clearTimeout(initialDelay);
-      clearInterval(interval);
-      if (fadeTimer) clearTimeout(fadeTimer);
-    };
-  }, []);
 
   // Clear chat history handler (Clears visible chat screen ONLY - long-term memory remains intact)
   const handleClearChatHistory = useCallback(() => {
@@ -992,6 +964,52 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
       </div>
     </motion.div>
 
+      {/* Offline Mode Banner */}
+      {!isApiOnline && (
+        <motion.div
+          initial={{ opacity: 0, y: -5 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="w-full max-w-xl mx-auto my-2 p-3 rounded-xl bg-amber-950/40 border border-amber-500/40 text-amber-200 text-xs font-mono flex flex-col sm:flex-row items-center justify-between gap-2 shadow-lg backdrop-blur-xl relative z-20"
+        >
+          <div className="flex items-center gap-2">
+            <WifiOff className="w-4 h-4 text-amber-400 shrink-0 animate-pulse" />
+            <span>
+              <strong>100% Offline Mode Active:</strong> Local Companion Engine & Memory Store operational.
+            </span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => {
+                audioSynth.playNodeClick(400);
+              }}
+              className="px-2.5 py-1 bg-amber-900/80 hover:bg-amber-800 text-amber-100 rounded-lg text-[10px] font-bold border border-amber-400/40 transition-all"
+            >
+              Proceed
+            </button>
+            <button
+              onClick={async () => {
+                audioSynth.playNodeClick(700);
+                try {
+                  const url = getApiEndpoint('/api/health');
+                  const res = await loggedFetch(url, { signal: AbortSignal.timeout(4000) });
+                  if (res.ok) {
+                    setIsApiOnline(true);
+                    audioSynth.playEnergyBloom();
+                  } else {
+                    audioSynth.triggerHaptic([30, 30]);
+                  }
+                } catch (e) {
+                  audioSynth.triggerHaptic([30, 30]);
+                }
+              }}
+              className="px-2.5 py-1 bg-purple-950 hover:bg-purple-900 text-purple-200 rounded-lg text-[10px] font-bold border border-purple-500/40 transition-all flex items-center gap-1"
+            >
+              <RefreshCw className="w-3 h-3 text-purple-300" /> Restore / Refresh
+            </button>
+          </div>
+        </motion.div>
+      )}
+
       {/* Hidden File Input for Vault Upload / Restore */}
       <input
         type="file"
@@ -1083,6 +1101,12 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
                   }`}
                 >
                   <p className="whitespace-pre-wrap select-text cursor-text">{m.text}</p>
+
+                  {/* Media Attachments (Image / Video / Audio / Code) */}
+                  {m.mediaAttachments && m.mediaAttachments.map((att, attIdx) => (
+                    <MediaAttachmentCard key={attIdx} attachment={att} />
+                  ))}
+
                   <div className="mt-2 pt-1.5 border-t border-purple-500/20 flex items-center justify-end">
                     <button
                       onClick={() => handleCopyMsg(m.id, m.text)}
@@ -1133,32 +1157,197 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
 
           <div ref={messagesEndRef} />
         </div>
-
-        {/* Spontaneous Passing Thoughts (💭 Floats naturally over dark void) */}
-        <AnimatePresence>
-          {spontaneousThought && (
-            <motion.div
-              key={spontaneousThought.id}
-              initial={{ opacity: 0, scale: 0.9, y: 10 }}
-              animate={{
-                opacity: [0, 0.95, 0.95, 0.95, 0],
-                scale: [0.9, 1, 1, 1, 0.95],
-                y: [10, 0, -5, -8, -12],
-              }}
-              transition={{ duration: 15, times: [0, 0.08, 0.5, 0.85, 1] }}
-              className={`absolute ${spontaneousThought.posClass} z-20 max-w-[240px] sm:max-w-[280px] p-3.5 rounded-2xl bg-zinc-900/90 border border-purple-400/30 backdrop-blur-xl shadow-[0_10px_30px_rgba(0,0,0,0.9)] text-xs sm:text-sm text-purple-200 leading-snug flex items-start gap-2.5 pointer-events-none`}
-            >
-              <span className="text-base select-none">💭</span>
-              <span>{spontaneousThought.text}</span>
-            </motion.div>
-          )}
-        </AnimatePresence>
       </div>
 
       {/* ──────────────────────────────────────────────────────────── */}
       {/* BOTTOM DOCKED CHAT BAR */}
       {/* ──────────────────────────────────────────────────────────── */}
-      <div className="w-full max-w-xl flex flex-col gap-3 relative z-30 mb-2">
+      <div className="w-full max-w-xl flex flex-col gap-2 relative z-30 mb-2">
+        {/* Function Options Toolbar Above Chat Input */}
+        <div className="flex items-center gap-1.5 overflow-x-auto custom-scrollbar px-1 py-1 bg-zinc-950/85 backdrop-blur-xl rounded-2xl border border-purple-500/30 shadow-lg">
+          <button
+            type="button"
+            onClick={() => {
+              audioSynth.playNodeClick(400);
+              setStudioTab('image');
+              setIsStudioOpen(true);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-950/50 hover:bg-purple-900/80 border border-purple-500/30 text-purple-200 text-xs font-semibold whitespace-nowrap transition-all"
+          >
+            <ImageIcon className="w-3.5 h-3.5 text-purple-400" />
+            <span>Create Image</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              audioSynth.playNodeClick(450);
+              setStudioTab('modify');
+              setIsStudioOpen(true);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-950/50 hover:bg-purple-900/80 border border-purple-500/30 text-purple-200 text-xs font-semibold whitespace-nowrap transition-all"
+          >
+            <Wand2 className="w-3.5 h-3.5 text-purple-400" />
+            <span>Modify Image</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              audioSynth.playNodeClick(500);
+              setStudioTab('video');
+              setIsStudioOpen(true);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-950/50 hover:bg-purple-900/80 border border-purple-500/30 text-purple-200 text-xs font-semibold whitespace-nowrap transition-all"
+          >
+            <Video className="w-3.5 h-3.5 text-purple-400" />
+            <span>AI Video</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              audioSynth.playNodeClick(550);
+              setStudioTab('audio');
+              setIsStudioOpen(true);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-950/50 hover:bg-purple-900/80 border border-purple-500/30 text-purple-200 text-xs font-semibold whitespace-nowrap transition-all"
+          >
+            <Mic className="w-3.5 h-3.5 text-purple-400" />
+            <span>Voice & Sound</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              audioSynth.playNodeClick(600);
+              setStudioTab('code');
+              setIsStudioOpen(true);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-950/50 hover:bg-purple-900/80 border border-purple-500/30 text-purple-200 text-xs font-semibold whitespace-nowrap transition-all"
+          >
+            <Code2 className="w-3.5 h-3.5 text-purple-400" />
+            <span>Code Studio</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              audioSynth.playNodeClick(650);
+              setStudioTab('research');
+              setIsStudioOpen(true);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-950/50 hover:bg-purple-900/80 border border-purple-500/30 text-purple-200 text-xs font-semibold whitespace-nowrap transition-all"
+          >
+            <Search className="w-3.5 h-3.5 text-purple-400" />
+            <span>Deep Research</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              audioSynth.playNodeClick(700);
+              setStudioTab('memory');
+              setIsStudioOpen(true);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-950/50 hover:bg-purple-900/80 border border-purple-500/30 text-purple-200 text-xs font-semibold whitespace-nowrap transition-all"
+          >
+            <Brain className="w-3.5 h-3.5 text-purple-400" />
+            <span>Neural Memory</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              audioSynth.playNodeClick(750);
+              setStudioTab('agent');
+              setIsStudioOpen(true);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-950/50 hover:bg-purple-900/80 border border-purple-500/30 text-purple-200 text-xs font-semibold whitespace-nowrap transition-all"
+          >
+            <Bot className="w-3.5 h-3.5 text-purple-400" />
+            <span>Auto Agent</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              audioSynth.playNodeClick(800);
+              setStudioTab('canvas');
+              setIsStudioOpen(true);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-950/50 hover:bg-purple-900/80 border border-purple-500/30 text-purple-200 text-xs font-semibold whitespace-nowrap transition-all"
+          >
+            <Palette className="w-3.5 h-3.5 text-purple-400" />
+            <span>Visual Canvas</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              audioSynth.playNodeClick(850);
+              setStudioTab('movie');
+              setIsStudioOpen(true);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-950/50 hover:bg-purple-900/80 border border-purple-500/30 text-purple-200 text-xs font-semibold whitespace-nowrap transition-all"
+          >
+            <Film className="w-3.5 h-3.5 text-purple-400" />
+            <span>Movie Studio</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              audioSynth.playNodeClick(900);
+              setStudioTab('beat');
+              setIsStudioOpen(true);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-950/50 hover:bg-purple-900/80 border border-purple-500/30 text-purple-200 text-xs font-semibold whitespace-nowrap transition-all"
+          >
+            <Music className="w-3.5 h-3.5 text-purple-400" />
+            <span>Beat Producer</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              audioSynth.playNodeClick(950);
+              setStudioTab('pdf');
+              setIsStudioOpen(true);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-950/50 hover:bg-purple-900/80 border border-purple-500/30 text-purple-200 text-xs font-semibold whitespace-nowrap transition-all"
+          >
+            <FileText className="w-3.5 h-3.5 text-purple-400" />
+            <span>PDF Export</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              audioSynth.playNodeClick(1000);
+              setStudioTab('game');
+              setIsStudioOpen(true);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-950/50 hover:bg-purple-900/80 border border-purple-500/30 text-purple-200 text-xs font-semibold whitespace-nowrap transition-all"
+          >
+            <Gamepad2 className="w-3.5 h-3.5 text-purple-400" />
+            <span>Game Builder</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              audioSynth.playNodeClick(1050);
+              setStudioTab('apk');
+              setIsStudioOpen(true);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-950/50 hover:bg-purple-900/80 border border-purple-500/30 text-purple-200 text-xs font-semibold whitespace-nowrap transition-all"
+          >
+            <Package className="w-3.5 h-3.5 text-purple-400" />
+            <span>APK Package</span>
+          </button>
+        </div>
+
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -1187,6 +1376,14 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
           </div>
         </form>
       </div>
+
+      {/* AI Creation Studio Modal */}
+      <AiCreationStudioModal
+        isOpen={isStudioOpen}
+        initialTab={studioTab}
+        onClose={() => setIsStudioOpen(false)}
+        onSendToChat={handleStudioSendToChat}
+      />
     </div>
   );
 };

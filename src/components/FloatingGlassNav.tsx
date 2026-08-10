@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'motion/react';
-import { Brain, Compass, MessageSquareCode, History, Sliders, ShieldAlert, Sparkles } from 'lucide-react';
+import { Brain, Compass, MessageSquareCode, History, Sliders, Sparkles, Tv } from 'lucide-react';
 import { AppRoute, NexusSectionId } from '../types';
 import { audioSynth } from '../utils/audioSynthesizer';
 
@@ -13,12 +13,12 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { id: 'nexus', label: 'NEXUS', icon: Sparkles, accentColor: '#C084FC' },
+  { id: 'livePreviewStage', label: 'PREVIEW STAGE', icon: Tv, accentColor: '#F43F5E' },
   { id: 'brain', label: 'BRAIN', icon: Brain, accentColor: '#C084FC' },
   { id: 'missions', label: 'MISSIONS', icon: Compass, accentColor: '#A855F7' },
   { id: 'chat', label: 'CHAT', icon: MessageSquareCode, accentColor: '#38BDF8' },
   { id: 'memory', label: 'MEMORY', icon: History, accentColor: '#E879F9' },
   { id: 'commandCenter', label: 'COMMAND', icon: Sliders, accentColor: '#34D399' },
-  { id: 'orbDefense', label: 'DEFENSE', icon: ShieldAlert, accentColor: '#F43F5E' },
 ];
 
 interface FloatingGlassNavProps {

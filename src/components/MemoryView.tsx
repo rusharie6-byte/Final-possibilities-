@@ -37,6 +37,7 @@ import { audioSynth } from '../utils/audioSynthesizer';
 import { companionEngine } from '../utils/companionEngine';
 import { approvalEngine } from '../utils/approvalEngine';
 import { timestampCapsuleEngine, TimestampCapsule, DistillationStats } from '../utils/timestampCapsuleEngine';
+import { ExtendedPartnerProfile } from '../utils/memoryStore';
 
 type ActiveTab = 'profile' | 'context' | 'capsules' | 'core' | 'reflection' | 'proposals';
 
@@ -358,6 +359,22 @@ export const MemoryView: React.FC = () => {
               </div>
             </div>
 
+            {/* Locked Vault Protection Banner */}
+            <div className="p-3.5 rounded-2xl bg-amber-950/40 border border-amber-500/40 flex items-center justify-between gap-3 text-xs text-amber-200 backdrop-blur-md">
+              <div className="flex items-center gap-2.5">
+                <Lock className="w-4 h-4 text-amber-400 shrink-0" />
+                <div>
+                  <span className="font-bold text-amber-100 font-mono tracking-wider uppercase">LOCKED PARTNER ANCHOR</span>
+                  <p className="text-[11px] text-amber-200/80 leading-snug">
+                    Creator Arno (Arie) & Partner Profile foundations are securely locked in Sacred Core Memory.
+                  </p>
+                </div>
+              </div>
+              <span className="text-[10px] font-mono font-bold px-2.5 py-1 rounded-full bg-amber-900/80 border border-amber-400/50 text-amber-100 shrink-0">
+                PROTECTED VAULT
+              </span>
+            </div>
+
             {/* Profile Editing Form or Visual Card View */}
             {isEditingProfile ? (
               <form onSubmit={handleSaveProfile} className="p-5 rounded-2xl bg-zinc-950 border border-purple-500/50 flex flex-col gap-4 shadow-2xl">
@@ -365,6 +382,51 @@ export const MemoryView: React.FC = () => {
                   <Sparkles className="w-4 h-4 text-purple-400" />
                   MANUALLY REFINE PARTNER PROFILE UNDERSTANDING
                 </h3>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-3.5 rounded-xl bg-purple-950/30 border border-purple-500/30">
+                  <div>
+                    <label className="block text-[11px] font-mono text-purple-300 mb-1">Audience Maturity / Age Status</label>
+                    <select
+                      value={(profileForm as ExtendedPartnerProfile).isAdult !== false ? 'adult' : 'minor'}
+                      onChange={(e) => {
+                        const isAdult = e.target.value === 'adult';
+                        setProfileForm({
+                          ...profileForm,
+                          isAdult,
+                          foulLanguageAllowed: isAdult ? ((profileForm as ExtendedPartnerProfile).foulLanguageAllowed ?? true) : false,
+                        } as any);
+                      }}
+                      className="w-full bg-black border border-purple-500/30 rounded-xl p-2 text-xs text-white focus:outline-none focus:border-purple-400 font-sans"
+                    >
+                      <option value="adult">Adult (18+ Years Old)</option>
+                      <option value="minor">Young / Minor (Under 18 Years Old)</option>
+                    </select>
+                    <p className="text-[10px] text-purple-300/60 mt-1">
+                      Minor status enforces 100% strictly clean language with zero profanity.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-mono text-purple-300 mb-1">Strong Language Policy</label>
+                    <select
+                      disabled={(profileForm as ExtendedPartnerProfile).isAdult === false}
+                      value={(profileForm as ExtendedPartnerProfile).foulLanguageAllowed !== false && (profileForm as ExtendedPartnerProfile).isAdult !== false ? 'allowed' : 'strictly_clean'}
+                      onChange={(e) =>
+                        setProfileForm({
+                          ...profileForm,
+                          foulLanguageAllowed: e.target.value === 'allowed',
+                        } as any)
+                      }
+                      className="w-full bg-black border border-purple-500/30 rounded-xl p-2 text-xs text-white focus:outline-none focus:border-purple-400 font-sans disabled:opacity-50"
+                    >
+                      <option value="allowed">Adult Appropriate (Allowed only when contextually appropriate)</option>
+                      <option value="strictly_clean">Strictly Clean (Zero Foul Language / Profanity)</option>
+                    </select>
+                    <p className="text-[10px] text-purple-300/60 mt-1">
+                      Controls whether Possibilities can use occasional strong language for emphasis/roasting.
+                    </p>
+                  </div>
+                </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
@@ -471,6 +533,41 @@ export const MemoryView: React.FC = () => {
               </form>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {/* Age & Language Standard Card */}
+                <div className="p-5 rounded-2xl bg-black border border-purple-500/30 flex flex-col gap-3 shadow-lg hover:border-purple-400/50 transition-all">
+                  <div className="flex items-center gap-2 text-xs font-bold text-purple-300 font-mono">
+                    <ShieldCheck className="w-4 h-4 text-purple-400" />
+                    <span>AGE & LANGUAGE STANDARD</span>
+                  </div>
+                  <div className="text-xs text-purple-200/90 leading-relaxed flex flex-col gap-2">
+                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-purple-950/40 border border-purple-500/20">
+                      <span className="text-[11px] text-purple-300">Audience Rating:</span>
+                      <span className={`text-[11px] font-mono font-bold px-2.5 py-0.5 rounded-md ${
+                        (profile as ExtendedPartnerProfile).isAdult !== false ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-500/30' : 'bg-amber-950/80 text-amber-300 border border-amber-500/30'
+                      }`}>
+                        {(profile as ExtendedPartnerProfile).isAdult !== false ? 'Adult (18+)' : 'Young / Minor (<18)'}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-purple-950/40 border border-purple-500/20">
+                      <span className="text-[11px] text-purple-300">Language Standard:</span>
+                      <span className={`text-[11px] font-mono font-bold px-2.5 py-0.5 rounded-md ${
+                        (profile as ExtendedPartnerProfile).isAdult !== false && (profile as ExtendedPartnerProfile).foulLanguageAllowed !== false
+                          ? 'bg-purple-900/80 text-purple-200 border border-purple-400/40'
+                          : 'bg-cyan-950/80 text-cyan-200 border border-cyan-500/30'
+                      }`}>
+                        {(profile as ExtendedPartnerProfile).isAdult !== false && (profile as ExtendedPartnerProfile).foulLanguageAllowed !== false
+                          ? 'Adult Appropriate'
+                          : 'Strictly Clean'}
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-purple-300/70 italic mt-1 leading-snug">
+                      {(profile as ExtendedPartnerProfile).isAdult === false || (profile as ExtendedPartnerProfile).foulLanguageAllowed === false
+                        ? 'Possibilities is strictly instructed to use 100% clean language with zero profanity under all circumstances.'
+                        : 'Possibilities is permitted to use mild strong language only when contextually appropriate for emphasis or witty roasting.'}
+                    </p>
+                  </div>
+                </div>
+
                 {/* Personality & Style Card */}
                 <div className="p-5 rounded-2xl bg-black border border-purple-500/30 flex flex-col gap-3 shadow-lg hover:border-purple-400/50 transition-all">
                   <div className="flex items-center gap-2 text-xs font-bold text-purple-300 font-mono">

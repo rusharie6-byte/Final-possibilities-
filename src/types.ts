@@ -1,4 +1,4 @@
-export type NexusSectionId = 'brain' | 'missions' | 'chat' | 'memory' | 'commandCenter' | 'orbDefense';
+export type NexusSectionId = 'brain' | 'missions' | 'chat' | 'memory' | 'commandCenter' | 'livePreviewStage';
 
 export type AppRoute = 'home' | 'nexus' | NexusSectionId | 'search' | 'settings';
 
@@ -93,6 +93,19 @@ export interface StagedActionPayload {
   executionResult?: string;
 }
 
+export interface MediaAttachment {
+  type: 'image' | 'video' | 'audio' | 'code' | 'research' | 'memory' | 'agent' | 'canvas' | 'movie' | 'beat' | 'pdf' | 'game' | 'apk';
+  url?: string;
+  title?: string;
+  prompt?: string;
+  aspectRatio?: string;
+  style?: string;
+  codeLanguage?: string;
+  codeSnippet?: string;
+  audioDurationSeconds?: number;
+  metadata?: Record<string, any>;
+}
+
 export interface ChatMessage {
   id: string;
   sender: 'user' | 'possibilities';
@@ -101,6 +114,7 @@ export interface ChatMessage {
   thoughtProcess?: string;
   isStreaming?: boolean;
   stagedAction?: StagedActionPayload;
+  mediaAttachments?: MediaAttachment[];
 }
 
 export interface CommitReceipt {

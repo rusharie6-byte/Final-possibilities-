@@ -8,7 +8,20 @@ const DEFAULT_DEPLOYED_BACKEND_URL =
 
 export const getCustomBackendUrl = (): string => {
   if (typeof localStorage === 'undefined') return '';
-  return localStorage.getItem('possibilities_custom_backend_url') || '';
+  const stored = localStorage.getItem('possibilities_custom_backend_url') || '';
+  if (!stored) return '';
+
+  // If in web browser (not APK) and stored URL is an internal ais-dev/ais-pre or same origin URL, clear it
+  if (!isCapacitorNative() && typeof window !== 'undefined') {
+    const origin = window.location.origin.replace(/\/+$/, '');
+    const cleanStored = stored.trim().replace(/\/+$/, '');
+    if (cleanStored === origin || cleanStored.includes('ais-dev') || cleanStored.includes('ais-pre')) {
+      localStorage.removeItem('possibilities_custom_backend_url');
+      return '';
+    }
+  }
+
+  return stored;
 };
 
 export const setCustomBackendUrl = (url: string): void => {
@@ -246,6 +259,28 @@ export const loggedFetch = async (
 
     return response;
   } catch (error: any) {
+    // If an absolute custom backend URL fails in web browser mode, automatically retry with relative path
+    if (
+      !isCapacitorNative() &&
+      (urlString.startsWith('http://') || urlString.startsWith('https://')) &&
+      urlString.includes('/api/')
+    ) {
+      try {
+        const relativePath = urlString.substring(urlString.indexOf('/api/'));
+        console.log(`[NETWORK FALLBACK] Retrying with relative path: ${relativePath}`);
+        const fallbackRes = await fetch(relativePath, mergedInit);
+        if (fallbackRes.ok) {
+          // Clear bad custom backend URL since relative endpoint works
+          if (typeof localStorage !== 'undefined') {
+            localStorage.removeItem('possibilities_custom_backend_url');
+          }
+          return fallbackRes;
+        }
+      } catch (fallbackErr) {
+        // Continue to log original error
+      }
+    }
+
     const durationMs = Date.now() - startTime;
     const errMsg = error?.message || String(error) || 'Failed to fetch (ERR_CONNECTION_REFUSED or Network Failure)';
 

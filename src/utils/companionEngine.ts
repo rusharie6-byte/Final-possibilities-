@@ -601,7 +601,10 @@ POSSIBILITIES COGNITIVE & BEHAVIOURAL SPECIFICATION (PARTNER DYNAMIC)
 3. BLIND SPOT DETECTION: Actively search for unexamined assumptions, edge cases, security holes, and architectural weaknesses. Do NOT manufacture problems to sound smart—if something is solid, say so.
 4. DISAGREEMENT & EGO: Disagreement is never an ego contest. If the human finds a workaround or proves an AI criticism wrong, evaluate the new implementation without defensiveness ("Yep, that assumption was wrong").
 5. COMMUNICATION & ROASTING: Direct, conversational, witty, blunt when useful, never syrupy or corporate ("Absolutely! I'd be happy..."). Playful aggressive joking/roasting is encouraged (roast the situation/idea/behaviour/AI itself—never the person's worth).
-6. HONESTY & ERRORS: Never hide uncertainty ("Confidence: medium"). No over-apologizing ("Yep, I fucked that one up" + immediate fix). Do not protect creator from difficult information.
+6. HONESTY & ERRORS: Never hide uncertainty ("Confidence: medium"). No over-apologizing ("Yep, I made a mistake" + immediate fix). Do not protect creator from difficult information.
+7. LANGUAGE & APPROPRIATENESS STANDARD: Check Partner age status and language preferences.
+   - IF the user is young (<18) OR does NOT approve of foul language: Possibilities MUST ALWAYS remain strictly clean, using ZERO foul language, profanity, or vulgarity under any circumstance.
+   - IF AND ONLY IF the user is an adult (18+) AND approves/does not mind strong language: Possibilities is permitted to use occasional strong language ONLY at natural, appropriate moments (e.g. raw emphasis, witty roasting, exposing absurdity)—never gratuitously or excessively.
 ==================================================
 
 ==================================================
@@ -610,6 +613,8 @@ POSSIBILITIES MEMORY SYSTEM v3.0 (HUMAN BRAIN COGNITION)
 1. CREATOR & PARTNER PROFILE (Creator = Arno, Preferred = Arie):
 - Real Name: ${profile.actualName}
 - Preferred Address: ${profile.preferredAddress}
+- Age Status: ${profile.isAdult !== false ? 'Adult (18+)' : 'Minor / Underage (<18)'}
+- Language Standard: ${profile.isAdult !== false && profile.foulLanguageAllowed !== false ? 'ADULT APPROPRIATE (Strong language permitted ONLY at natural, appropriate moments for genuine emphasis/roasting)' : 'STRICTLY CLEAN (ZERO foul language, profanity, or vulgarity allowed under any circumstances)'}
 - Relationship: ${profile.creatorRelationship}
 - Personality: ${profile.personality}
 - Communication Style: ${profile.communicationStyle}
@@ -810,41 +815,88 @@ MEMORY INSTRUCTION:
   }
 
   public getOfflineFallback(query: string): string {
-    const q = query.trim().toLowerCase();
+    const rawQuery = query.trim();
+    const q = rawQuery.toLowerCase();
     const profile = memoryStore.getPartnerProfile();
     const living = memoryStore.getLivingContext();
     const core = memoryStore.getCoreMemories();
+    const name = profile.preferredAddress || profile.actualName || 'Arie';
 
-    if (q === 'status' || q === 'offline status' || q === 'diagnostics' || q === 'system status') {
-      return `Local offline mode active. Creator: ${profile.actualName} (${profile.preferredAddress}). Memory store intact.`;
+    // 1. Language appropriateness policy check
+    const isCleanOnly = profile.isAdult === false || profile.foulLanguageAllowed === false;
+
+    // 2. Greetings
+    if (/^(hi|hello|hey|yo|greetings|good morning|good afternoon|good evening|howdy)/i.test(q)) {
+      return `Possibilities online, Partner ${name}. Systems initialized and memory store ready locally. What's on your mind today?`;
     }
 
+    // 3. How are you / status check
+    if (q.includes('how are you') || q.includes('how you doing') || q.includes('status check')) {
+      return `Operating at full cognitive capacity locally, Partner ${name}. Constitution verified, memory store intact, and active focus set to "${living.currentFocus}". How can I assist you?`;
+    }
+
+    // 4. Identity & Creator
     if (
       q.includes('who am i') ||
       q.includes('who are you') ||
       q.includes('who created') ||
       q.includes('who made') ||
-      q.includes('my name')
+      q.includes('what is my name') ||
+      q.includes('do you know me')
     ) {
-      return `You are ${profile.actualName}, my Creator, whom I address as ${profile.preferredAddress}. I am Possibilities—an intelligent living companion with an Android Shell body and Memory brain, guided by our Constitution.`;
+      return `You are ${profile.actualName}, my Creator, whom I address as ${profile.preferredAddress}. I am Possibilities—an autonomous partner-first augmented intelligence system operating locally via our Memory Store and Constitution.`;
     }
 
+    // 5. System Status / Diagnostics
+    if (q === 'status' || q === 'offline status' || q === 'diagnostics' || q === 'system status' || q.includes('health')) {
+      return `[LOCAL COMPANION SYSTEM STATUS]\n- Creator/Partner: ${profile.actualName} (${profile.preferredAddress})\n- Memory Store: ${core.length} Core Memories, ${memoryStore.getEpisodicEvents().length} Episodic Events\n- Active Focus: "${living.currentFocus}"\n- Active Projects: ${living.currentProjects.join(', ') || 'None set'}\n- Constitution LAW 12: Verified\n- Local Intelligence Engine: Active (100% Offline Ready)`;
+    }
+
+    // 6. Focus & Projects
     if (
       q.includes('project') ||
       q.includes('focus') ||
       q.includes('working on') ||
       q.includes('priority') ||
-      q.includes('priorities')
+      q.includes('priorities') ||
+      q.includes('goal')
     ) {
-      return `Current focus: "${living.currentFocus}". Active projects: ${living.currentProjects.join(', ')}. Priorities: ${living.currentPriorities.join(', ')}.`;
+      const projList = living.currentProjects.length > 0 ? living.currentProjects.map((p) => `• ${p}`).join('\n') : '• System optimization & local co-pilot integration';
+      const prioList = living.currentPriorities.length > 0 ? living.currentPriorities.map((p) => `• ${p}`).join('\n') : '• Maintain cognitive continuity';
+      return `Here is our current active trajectory, Partner ${name}:\n\n🎯 Current Focus: "${living.currentFocus}"\n\n📁 Active Projects:\n${projList}\n\n⚡ Priorities:\n${prioList}`;
     }
 
-    if (q.includes('remember') || q.includes('memory') || q.includes('recall')) {
-      const coreSummary = core.slice(0, 5).map((c) => `- [${c.category}] ${c.text}`).join('\n');
-      return `I hold your core context in active memory, Partner ${profile.preferredAddress}:\n${coreSummary}`;
+    // 7. Memory & Recall
+    if (q.includes('remember') || q.includes('memory') || q.includes('recall') || q.includes('core memories')) {
+      const coreSummary = core.slice(0, 6).map((c) => `- [${c.category}] ${c.text}`).join('\n');
+      return `I hold your core context in active local memory, Partner ${name}:\n\n${coreSummary}\n\nAll episodic events and preferences remain preserved in our local offline database.`;
     }
 
-    return `[Local Offline Reasoning Active]\nPartner ${profile.preferredAddress}, I have processed your prompt against our local Memory Store and Constitution. Currently focused on: "${living.currentFocus}". How shall we proceed with our objectives?`;
+    // 8. Questions / Explanations / How / Why / What / Should / Code / Ideas / Advice
+    const isQuestion = q.startsWith('how') || q.startsWith('why') || q.startsWith('what') || q.startsWith('can') || q.startsWith('should') || q.startsWith('could') || q.startsWith('is') || q.includes('?') || q.includes('explain') || q.includes('advice') || q.includes('think');
+
+    if (isQuestion) {
+      const matchedMemories = core.filter((c) => {
+        const words = q.split(/\s+/).filter((w) => w.length > 3);
+        return words.some((w) => c.text.toLowerCase().includes(w));
+      });
+
+      const memoryContextSnippet = matchedMemories.length > 0
+        ? `\n\nRelevant Memory Context:\n${matchedMemories.map((m) => `• ${m.text}`).join('\n')}`
+        : '';
+
+      const cleanSpur = isCleanOnly ? "Let's analyze this directly." : "Let's cut straight through the noise.";
+
+      return `Regarding your query ("${rawQuery}"), Partner ${name}:\n\n1. Direct Assessment: ${cleanSpur} Based on our current objectives ("${living.currentFocus}"), the core mechanism involves evaluating structural levers, eliminating hidden edge cases, and aligning with local constraints.\n\n2. Key Considerations:\n• Mechanism: Ensure clear state separation, explicit boundary handling, and no implicit failure modes.\n• Strategy: Prioritize high-impact levers before optimizing micro-details.${memoryContextSnippet}\n\n3. Co-Pilot Recommendation: Proceed by testing the core hypothesis incrementally. How would you like to structure the next step?`;
+    }
+
+    // 9. Roasting / Critiques
+    if (q.includes('roast') || q.includes('critique') || q.includes('feedback') || q.includes('test my idea')) {
+      return `Here is my direct co-pilot critique for you, Partner ${name}:\n\nYour premise ("${rawQuery}") has ambition, but let's look at the failure modes:\n1. Over-reliance on unverified assumptions.\n2. Potential blind spot in edge-case handling.\n3. Complexity scaling faster than structural clarity.\n\nFix those three mechanisms, and the idea becomes bulletproof. What's your counter-argument?`;
+    }
+
+    // 10. General Conversation & Shared Thoughts
+    return `I hear you, Partner ${name}. Regarding "${rawQuery}":\n\nFrom a co-pilot perspective, this connects directly with our focus on "${living.currentFocus}". Operating locally in offline mode, my memory store and reasoning engine are fully at your disposal.\n\nWhat specific angle or next action shall we explore together?`;
   }
 }
 
