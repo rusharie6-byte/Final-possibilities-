@@ -13,6 +13,7 @@ import { AiCreationStudioModal, StudioTabType } from './AiCreationStudioModal';
 import { MediaAttachmentCard } from './MediaAttachmentCard';
 import { SettingsModal } from './SettingsModal';
 import { AppLifecycleBackupModal } from './AppLifecycleBackupModal';
+import { ApprovalGateModal, ToolProposal } from './ApprovalGateModal';
 
 const INITIAL_MESSAGES: ChatMessage[] = [];
 
@@ -41,6 +42,7 @@ export const ChatView: React.FC = () => {
   const [studioTab, setStudioTab] = useState<StudioTabType>('image');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
+  const [activeProposal, setActiveProposal] = useState<ToolProposal | null>(null);
   const [attachedFiles, setAttachedFiles] = useState<AttachedFileItem[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
 
@@ -320,15 +322,45 @@ export const ChatView: React.FC = () => {
         replyText = companionEngine.getOfflineFallback(finalPromptText);
       } else if (data.functionCalls && Array.isArray(data.functionCalls) && data.functionCalls.length > 0) {
         const fc = data.functionCalls[0];
-        const proposalId = approvalGate.stage_action(fc.name, fc.args || {});
-        stagedActionPayload = {
-          proposalId,
-          toolName: fc.name,
-          arguments: fc.args || {},
-          status: 'PENDING_APPROVAL',
-        };
-        if (!replyText) {
-          replyText = `Tool execution proposed by reasoning engine. Staged for Creator Arno/Arie sign-off [Proposal ID: ${proposalId}].`;
+        if (fc.name === 'list_directory' || fc.name === 'read_file') {
+          try {
+            const readRes = await loggedFetch(getApiEndpoint('/api/tools/read'), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ toolName: fc.name, args: fc.args || {} }),
+            });
+            const readData = await readRes.json();
+            if (readData.success) {
+              const formatted = typeof readData.data === 'object' ? JSON.stringify(readData.data, null, 2) : readData.data;
+              replyText = `Read Tool Output (${fc.name}):\n\`\`\`\n${formatted}\n\`\`\``;
+            } else {
+              replyText = `Read Tool Execution Error: ${readData.error || 'Failed to read'}`;
+            }
+          } catch (readErr: any) {
+            replyText = `Read Tool Execution Error: ${readErr.message}`;
+          }
+        } else if (fc.name === 'propose_file_change' || fc.name === 'propose_terminal_command' || fc.name === 'propose_file_write') {
+          setActiveProposal({
+            toolName: fc.name,
+            args: {
+              filePath: fc.args?.filePath || fc.args?.file_path,
+              command: fc.args?.command,
+              content: fc.args?.content,
+              reason: fc.args?.reason || fc.args?.reasoning || 'Proposed by AI system',
+            },
+          });
+          replyText = `Mutative Tool Action Proposed (${fc.name}). Biometric Authority Sign-Off Modal triggered on screen.`;
+        } else {
+          const proposalId = approvalGate.stage_action(fc.name, fc.args || {});
+          stagedActionPayload = {
+            proposalId,
+            toolName: fc.name,
+            arguments: fc.args || {},
+            status: 'PENDING_APPROVAL',
+          };
+          if (!replyText) {
+            replyText = `Tool execution proposed by reasoning engine. Staged for Creator Arno/Arie sign-off [Proposal ID: ${proposalId}].`;
+          }
         }
       }
 
@@ -1179,6 +1211,26 @@ export const ChatView: React.FC = () => {
         isOpen={isBackupModalOpen}
         onClose={() => setIsBackupModalOpen(false)}
       />
+
+      {/* Biometric Tool Execution Gatekeeper Modal */}
+      {activeProposal && (
+        <ApprovalGateModal
+          proposal={activeProposal}
+          onReject={() => setActiveProposal(null)}
+          onSuccess={(result) => {
+            setActiveProposal(null);
+            const sysMsg: ChatMessage = {
+              id: `p-exec-${Date.now()}`,
+              sender: 'possibilities',
+              text: `Tool Execution Authorized & Applied:\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\``,
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              thoughtProcess: 'Mutative tool execution authorized via Biometric Authority Sign-Off.',
+            };
+            setMessages((prev) => [...prev, sysMsg]);
+            audioSynth.playEnergyBloom();
+          }}
+        />
+      )}
     </div>
   );
 };
