@@ -88,7 +88,7 @@ async function startServer() {
           },
         });
         const testResponse = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
+          model: "gemini-3.6-flash",
           contents: "ping",
         });
         if (testResponse && testResponse.text) {
@@ -278,14 +278,14 @@ async function startServer() {
       let response: any;
       try {
         response = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
+          model: "gemini-3.6-flash",
           contents: contents,
           config,
         });
       } catch (firstErr: any) {
-        console.warn("Primary model attempt failed, falling back to gemini-2.5-flash:", firstErr?.message);
+        console.warn("Primary model attempt failed, falling back to gemini-2.0-flash:", firstErr?.message);
         response = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
+          model: "gemini-2.0-flash",
           contents: contents,
           config,
         });
