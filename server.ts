@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
@@ -31,6 +32,39 @@ async function startServer() {
     next();
   });
   app.use(express.json({ limit: '10mb' }));
+
+  // Cloud Memory Vault Storage (Server-side persistence across APK reinstalls & web sessions)
+  const vaultFilePath = path.join(process.cwd(), "possibilities_vault_server.json");
+
+  app.post("/api/vault/sync", (req, res) => {
+    try {
+      const { payload } = req.body;
+      if (payload) {
+        fs.writeFileSync(vaultFilePath, JSON.stringify(payload, null, 2), "utf-8");
+        console.log("[Vault API] Vault snapshot synced to server disk.");
+        return res.json({ status: "ok", message: "Vault synced to cloud server disk." });
+      }
+      res.status(400).json({ error: "Missing payload" });
+    } catch (err: any) {
+      console.error("[Vault Sync Error]", err);
+      res.status(500).json({ error: err?.message || "Failed to save server vault" });
+    }
+  });
+
+  app.get("/api/vault/restore", (req, res) => {
+    try {
+      if (fs.existsSync(vaultFilePath)) {
+        const raw = fs.readFileSync(vaultFilePath, "utf-8");
+        const payload = JSON.parse(raw);
+        console.log("[Vault API] Server vault snapshot restored for client.");
+        return res.json({ status: "ok", payload });
+      }
+      res.json({ status: "not_found", payload: null });
+    } catch (err: any) {
+      console.error("[Vault Restore Error]", err);
+      res.json({ status: "error", payload: null });
+    }
+  });
 
   // Health check endpoint for API status
   app.get("/api/health", async (req, res) => {
@@ -92,7 +126,7 @@ async function startServer() {
         });
       }
 
-      const { prompt, systemInstruction, history } = req.body;
+      const { prompt, systemInstruction, history, attachments } = req.body;
       const ai = new GoogleGenAI({
         apiKey,
         httpOptions: {
@@ -102,26 +136,82 @@ async function startServer() {
         },
       });
 
-      let contents: any = prompt;
+      // Prepare user parts including text prompt and any attached media (images, audio, video, files)
+      const userParts: any[] = [{ text: String(prompt || '') }];
+
+      const lowerPrompt = String(prompt || '').toLowerCase();
+      if (
+        lowerPrompt.includes('code') ||
+        lowerPrompt.includes('source') ||
+        lowerPrompt.includes('inspect') ||
+        lowerPrompt.includes('fix') ||
+        lowerPrompt.includes('bug') ||
+        lowerPrompt.includes('yourself') ||
+        lowerPrompt.includes('engine') ||
+        lowerPrompt.includes('raw')
+      ) {
+        try {
+          const keyFiles = [
+            'src/utils/companionEngine.ts',
+            'src/utils/memoryStore.ts',
+            'src/utils/storageEngine.ts',
+            'src/components/ChatView.tsx',
+            'server.ts'
+          ];
+          let codeContext = "\n\n[POSSIBILITIES RAW SOURCE CODEBASE ACCESS]:\n";
+          for (const f of keyFiles) {
+            const fullPath = path.join(process.cwd(), f);
+            if (fs.existsSync(fullPath)) {
+              const src = fs.readFileSync(fullPath, 'utf-8');
+              codeContext += `--- FILE: ${f} ---\n${src}\n\n`;
+            }
+          }
+          userParts.push({ text: codeContext });
+        } catch (e) {
+          console.warn('Could not attach raw codebase context:', e);
+        }
+      }
+
+      if (attachments && Array.isArray(attachments) && attachments.length > 0) {
+        for (const att of attachments) {
+          if (att.base64Data) {
+            userParts.push({
+              inlineData: {
+                mimeType: att.mimeType || 'image/png',
+                data: att.base64Data,
+              },
+            });
+          } else if (att.textPayload) {
+            userParts.push({
+              text: `\n\n[ATTACHED FILE CONTENT: ${att.name || 'document'}]\n${att.textPayload}\n[END OF ATTACHED FILE]`,
+            });
+          }
+        }
+      }
+
+      let contents: any = userParts;
+
       if (history && Array.isArray(history) && history.length > 0) {
         const rawList = [
           ...history.map((h: any) => ({
             role: h.role === 'user' ? 'user' : 'model',
             parts: [{ text: String(h.text || '') }]
           })),
-          { role: 'user', parts: [{ text: String(prompt || '') }] }
+          { role: 'user', parts: userParts }
         ];
 
         // Sanitize history to ensure strict user/model role alternation for Gemini API
         const sanitized: any[] = [];
         for (const item of rawList) {
-          if (!item.parts[0].text.trim()) continue;
+          const hasContent = item.parts.some((p: any) => p.text || p.inlineData);
+          if (!hasContent) continue;
+
           if (sanitized.length === 0) {
             sanitized.push(item);
           } else {
             const prevRole = sanitized[sanitized.length - 1].role;
             if (prevRole === item.role) {
-              sanitized[sanitized.length - 1].parts[0].text += `\n${item.parts[0].text}`;
+              sanitized[sanitized.length - 1].parts.push(...item.parts);
             } else {
               sanitized.push(item);
             }
@@ -132,8 +222,11 @@ async function startServer() {
         }
       }
 
-      // Direct call to primary supported model gemini-3.6-flash with Possibilities Tool Schemas
+      // Direct call to primary supported model gemini-3.6-flash with Possibilities Tool Schemas and Google Search Grounding
       const toolDeclarations = [
+        {
+          googleSearch: {}
+        },
         {
           functionDeclarations: [
             {

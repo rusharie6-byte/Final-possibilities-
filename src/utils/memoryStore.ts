@@ -333,6 +333,13 @@ export class MemoryStore {
           reflectionLogs: this.reflectionLogs,
         },
       });
+
+      // Auto-flush physical encrypted .vault backup to Documents/Possibilities/Vault/
+      import('../vault/MemoryVaultManager').then(({ memoryVaultManager }) => {
+        memoryVaultManager.exportEncryptedVaultToStorage('Possibilities-Creator-Arno').catch((err) => {
+          console.warn('[MemoryStore] Background native .vault write warning:', err);
+        });
+      }).catch(() => {});
     } catch (e) {
       console.error('MemoryStore failed to save to storage:', e);
     }
@@ -438,6 +445,15 @@ export class MemoryStore {
         category: 'Name',
         createdAt: new Date().toISOString(),
       });
+      changed = true;
+    }
+
+    // Purge any legacy Spotify song list memories as explicitly requested by user
+    const initialLen = this.coreMemories.length;
+    this.coreMemories = this.coreMemories.filter(
+      (m) => m.id !== 'core-spotify-12-songs' && !m.text.includes('SPOTIFY LIKED SONGS')
+    );
+    if (this.coreMemories.length !== initialLen) {
       changed = true;
     }
 
@@ -717,6 +733,25 @@ export class MemoryStore {
 
   public getSnapshots(): MemorySnapshot[] {
     return [...this.snapshots];
+  }
+
+  public exportSnapshot(): VaultPayload {
+    this.enforceCreatorIdentity();
+    return {
+      version: '1.0.0',
+      updatedAt: new Date().toISOString(),
+      filePath: 'Documents/Possibilities/possibilities_vault.json',
+      pendingJournal: [...this.pendingJournal],
+      memoryData: {
+        partnerProfile: { ...this.partnerProfile },
+        livingContext: { ...this.livingContext },
+        coreMemories: [...this.coreMemories],
+        episodicEvents: [...this.episodicEvents],
+        provenanceList: [...this.provenanceList],
+        temporaryRules: [...this.temporaryRules],
+        reflectionLogs: [...this.reflectionLogs],
+      },
+    };
   }
 
   public exportMemoryData() {

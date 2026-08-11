@@ -4,6 +4,7 @@
 
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { Capacitor } from '@capacitor/core';
+import { memoryStore } from './memoryStore';
 
 const PUBLIC_VAULT_FILENAME = 'Possibilities/possibilities_vault.json';
 const PUBLIC_VAULT_STORAGE_KEY = 'Documents/Possibilities/possibilities_vault.json';
@@ -222,6 +223,21 @@ export class StorageEngine {
         }
       }
 
+      // Sync snapshot to server backend for persistent cross-reinstall cloud restore
+      try {
+        const getApiUrl = (path: string) => {
+          if (typeof window !== 'undefined' && (window as any).getApiEndpoint) {
+            return (window as any).getApiEndpoint(path);
+          }
+          return path;
+        };
+        fetch(getApiUrl('/api/vault/sync'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ payload }),
+        }).catch(() => {});
+      } catch {}
+
       return true;
     } catch (e) {
       console.error('Failed to write vault snapshot to device storage:', e);
@@ -286,7 +302,28 @@ export class StorageEngine {
         encrypted = await this.readFromIndexedDB(this.filePath);
       }
 
-      if (!encrypted) return null;
+      if (!encrypted) {
+        // Fallback: Query cloud server restore endpoint if local storage was cleared/uninstalled
+        try {
+          const getApiUrl = (pathStr: string) => {
+            if (typeof window !== 'undefined' && (window as any).getApiEndpoint) {
+              return (window as any).getApiEndpoint(pathStr);
+            }
+            return pathStr;
+          };
+          const res = await fetch(getApiUrl('/api/vault/restore'));
+          if (res.ok) {
+            const data = await res.json();
+            if (data && data.status === 'ok' && data.payload) {
+              console.log('[StorageEngine] Rehydrated vault snapshot from cloud server backend.');
+              return data.payload;
+            }
+          }
+        } catch (err) {
+          console.warn('[StorageEngine] Server vault restore query note:', err);
+        }
+        return null;
+      }
 
       this.memVaultCache = encrypted;
       const decrypted = decryptVault(encrypted);
@@ -301,10 +338,34 @@ export class StorageEngine {
   // Trigger browser file download of encrypted or raw JSON vault file
   public exportVaultFileDownload(customFilename?: string): boolean {
     try {
-      const payload = this.readVaultSnapshot();
+      let payload = this.readVaultSnapshot();
       if (!payload) {
-        console.warn('[StorageEngine] No vault snapshot available to export.');
-        return false;
+        // Build fresh snapshot directly from memoryStore if cache is empty
+        try {
+          payload = memoryStore.exportSnapshot();
+          this.saveVaultSnapshot(payload);
+        } catch (e) {
+          console.warn('[StorageEngine] Could not build live memoryStore snapshot:', e);
+        }
+      }
+
+      if (!payload) {
+        // Fallback minimal valid snapshot payload
+        payload = {
+          version: '1.0.0',
+          updatedAt: new Date().toISOString(),
+          filePath: PUBLIC_VAULT_STORAGE_KEY,
+          pendingJournal: [],
+          memoryData: {
+            partnerProfile: memoryStore.getPartnerProfile(),
+            livingContext: memoryStore.getLivingContext(),
+            coreMemories: memoryStore.getCoreMemories(),
+            episodicEvents: memoryStore.getEpisodicEvents(),
+            provenanceList: [],
+            temporaryRules: [],
+            reflectionLogs: [],
+          },
+        };
       }
 
       const jsonString = JSON.stringify(payload, null, 2);
@@ -344,6 +405,26 @@ export class StorageEngine {
           console.error('[StorageEngine] Failed to parse imported file text as JSON or base64:', decErr);
           return null;
         }
+      }
+
+      // Handle direct top-level JSON payload formats
+      const rawAny = payload as any;
+      if (rawAny && !rawAny.memoryData && (rawAny.coreMemories || rawAny.partnerProfile)) {
+        payload = {
+          version: rawAny.version || '1.0.0',
+          updatedAt: rawAny.updatedAt || new Date().toISOString(),
+          filePath: PUBLIC_VAULT_STORAGE_KEY,
+          pendingJournal: rawAny.pendingJournal || [],
+          memoryData: {
+            partnerProfile: rawAny.partnerProfile || memoryStore.getPartnerProfile(),
+            livingContext: rawAny.livingContext || memoryStore.getLivingContext(),
+            coreMemories: rawAny.coreMemories || memoryStore.getCoreMemories(),
+            episodicEvents: rawAny.episodicEvents || [],
+            provenanceList: rawAny.provenanceList || [],
+            temporaryRules: rawAny.temporaryRules || [],
+            reflectionLogs: rawAny.reflectionLogs || [],
+          },
+        };
       }
 
       if (payload && payload.memoryData) {

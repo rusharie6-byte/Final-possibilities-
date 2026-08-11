@@ -155,7 +155,7 @@ export const AppLifecycleBackupModal: React.FC<AppLifecycleBackupModalProps> = (
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/85 backdrop-blur-lg">
+      <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/85 backdrop-blur-lg">
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}

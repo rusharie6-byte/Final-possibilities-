@@ -117,7 +117,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   return (
     <>
       <AnimatePresence>
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}

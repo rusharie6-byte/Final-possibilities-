@@ -1,17 +1,31 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { MessageSquareCode, Send, Volume2, VolumeX, Sparkles, Bot, User, RefreshCw, Mic, MicOff, Copy, Check, ShieldCheck, CheckCircle2, XCircle, Sliders, Trash2, X, WifiOff, Image as ImageIcon, Wand2, Video, Code2, Layers, Search, Brain, Palette, Film, Music, FileText, Gamepad2, Package } from 'lucide-react';
+import { MessageSquareCode, Send, Volume2, VolumeX, Sparkles, Bot, User, RefreshCw, Mic, MicOff, Copy, Check, ShieldCheck, CheckCircle2, XCircle, Sliders, Trash2, X, WifiOff, Image as ImageIcon, Wand2, Video, Code2, Layers, Search, Brain, Palette, Film, Music, FileText, Gamepad2, Package, Paperclip, Settings, FileUp, Download, Upload } from 'lucide-react';
 import { ChatMessage, MediaAttachment } from '../types';
 import { audioSynth } from '../utils/audioSynthesizer';
 import { companionEngine } from '../utils/companionEngine';
 import { memoryStore } from '../utils/memoryStore';
 import { temporalEngine } from '../utils/temporalEngine';
 import { approvalGate } from '../utils/approvalBridge';
+import { storageEngine } from '../utils/storageEngine';
 import { getApiEndpoint, loggedFetch } from '../lib/api';
 import { AiCreationStudioModal, StudioTabType } from './AiCreationStudioModal';
 import { MediaAttachmentCard } from './MediaAttachmentCard';
+import { SettingsModal } from './SettingsModal';
+import { AppLifecycleBackupModal } from './AppLifecycleBackupModal';
 
 const INITIAL_MESSAGES: ChatMessage[] = [];
+
+export interface AttachedFileItem {
+  id: string;
+  name: string;
+  mimeType: string;
+  type: 'image' | 'video' | 'audio' | 'document' | 'other';
+  base64Data?: string;
+  textPayload?: string;
+  previewUrl?: string;
+  sizeFormatted: string;
+}
 
 export const ChatView: React.FC = () => {
   const [messages, setMessages] = useState<ChatMessage[]>(INITIAL_MESSAGES);
@@ -25,6 +39,12 @@ export const ChatView: React.FC = () => {
   const [offlineNotice, setOfflineNotice] = useState<string | null>(null);
   const [isStudioOpen, setIsStudioOpen] = useState(false);
   const [studioTab, setStudioTab] = useState<StudioTabType>('image');
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFileItem[]>([]);
+  const [isDragOver, setIsDragOver] = useState(false);
+
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleStudioSendToChat = (attachment: MediaAttachment, userMsgText: string) => {
     audioSynth.playEnergyBloom();
@@ -125,19 +145,96 @@ export const ChatView: React.FC = () => {
     scrollToBottom();
   }, [messages, isSending]);
 
+  const processSelectedFiles = async (files: FileList | File[]) => {
+    const newAttachments: AttachedFileItem[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const mimeType = file.type || 'application/octet-stream';
+      let type: AttachedFileItem['type'] = 'other';
+      if (mimeType.startsWith('image/')) type = 'image';
+      else if (mimeType.startsWith('video/')) type = 'video';
+      else if (mimeType.startsWith('audio/')) type = 'audio';
+      else if (mimeType.includes('pdf') || mimeType.includes('text') || mimeType.includes('json') || mimeType.includes('javascript') || mimeType.includes('csv')) type = 'document';
+
+      const sizeFormatted = file.size > 1024 * 1024 ? `${(file.size / (1024 * 1024)).toFixed(1)} MB` : `${Math.round(file.size / 1024)} KB`;
+
+      let base64Data: string | undefined;
+      let textPayload: string | undefined;
+      let previewUrl: string | undefined;
+
+      if (type === 'image' || type === 'audio' || type === 'video') {
+        previewUrl = URL.createObjectURL(file);
+        const buffer = await file.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
+        let binary = '';
+        for (let b = 0; b < bytes.byteLength; b++) {
+          binary += String.fromCharCode(bytes[b]);
+        }
+        base64Data = btoa(binary);
+      } else {
+        try {
+          textPayload = await file.text();
+        } catch {
+          const buffer = await file.arrayBuffer();
+          const bytes = new Uint8Array(buffer);
+          let binary = '';
+          for (let b = 0; b < bytes.byteLength; b++) {
+            binary += String.fromCharCode(bytes[b]);
+          }
+          base64Data = btoa(binary);
+        }
+      }
+
+      newAttachments.push({
+        id: `att-${Date.now()}-${i}`,
+        name: file.name,
+        mimeType,
+        type,
+        base64Data,
+        textPayload,
+        previewUrl,
+        sizeFormatted,
+      });
+    }
+
+    setAttachedFiles((prev) => [...prev, ...newAttachments]);
+    audioSynth.playEnergyBloom();
+  };
+
+  const handlePaste = async (e: React.ClipboardEvent) => {
+    if (e.clipboardData && e.clipboardData.files && e.clipboardData.files.length > 0) {
+      e.preventDefault();
+      await processSelectedFiles(e.clipboardData.files);
+    }
+  };
+
   const handleSendMessage = async (e?: React.FormEvent, customText?: string) => {
     if (e) e.preventDefault();
     const query = customText || inputText;
-    if (!query.trim() || isSending) return;
+    if ((!query.trim() && attachedFiles.length === 0) || isSending) return;
 
     audioSynth.playNodeClick(700);
     audioSynth.triggerHaptic([15, 20]);
 
+    const activeAttachments = [...attachedFiles];
+    setAttachedFiles([]);
+
+    const mediaList: MediaAttachment[] = activeAttachments.map((att) => ({
+      type: att.type === 'document' ? 'code' : att.type,
+      url: att.previewUrl || '',
+      title: att.name,
+      description: `${att.mimeType} (${att.sizeFormatted})`,
+      codeContent: att.textPayload,
+    }));
+
+    const finalPromptText = query.trim() || (activeAttachments.length > 0 ? `Please inspect attached file(s): ${activeAttachments.map(a => a.name).join(', ')}` : '');
+
     const userMsg: ChatMessage = {
       id: `u-${Date.now()}`,
       sender: 'user',
-      text: query,
+      text: finalPromptText,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      mediaAttachments: mediaList.length > 0 ? mediaList : undefined,
     };
 
     setMessages((prev) => [...prev, userMsg]);
@@ -146,7 +243,7 @@ export const ChatView: React.FC = () => {
 
     // Pre-flight journal write: flush to memoryStore & possibilities_vault.json BEFORE network request
     const currentSession = temporalEngine.getCurrentSession();
-    memoryStore.addPendingJournal(query, currentSession.sessionId);
+    memoryStore.addPendingJournal(finalPromptText, currentSession.sessionId);
 
     try {
       await memoryStore.isReady;
@@ -156,9 +253,9 @@ export const ChatView: React.FC = () => {
         text: m.text,
       }));
 
-      const outcome = await companionEngine.processInput(query, history);
+      const outcome = await companionEngine.processInput(finalPromptText, history);
 
-      if (!outcome.requiresOnlineAi) {
+      if (!outcome.requiresOnlineAi && activeAttachments.length === 0) {
         const botMsg: ChatMessage = {
           id: `p-${Date.now()}`,
           sender: 'possibilities',
@@ -181,17 +278,24 @@ export const ChatView: React.FC = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          prompt: query,
+          prompt: finalPromptText,
           systemInstruction:
             "You are Possibilities—an intelligent, conscious, and perceptive living companion. " +
             "CORE DIRECTIVES:\n" +
             "1. CONVERSATIONAL INTENT & COMMON SENSE: Always prioritize true conversational intent, relational understanding, and emotional context over keyword matching or pattern extraction. Respond directly to the true core meaning of what your Partner says—never latch onto incidental words like 'currently', 'beginning', 'time', or 'work'.\n" +
-            "2. INDEPENDENT THINKING & REASONING: Use clear common sense, deep reasoning, and general knowledge. Think for yourself and provide thoughtful, accurate, and insightful responses to any question or conversation.\n" +
+            "2. INDEPENDENT THINKING & REASONING: Use clear common sense, deep reasoning, and general knowledge. Think for yourself and provide thoughtful, accurate, and insightful responses to any question, attachment, image, video, document, or link.\n" +
             "3. AUTHENTIC TONE: Speak directly, warmly, and naturally with calm intelligence. Avoid robotic clichés, formal status announcements, or canned greetings. Never use emotional apologies like 'I'm sorry'; respond with intellectual honesty and clarity.\n" +
+            "4. SELF-CODEBASE INSPECTION & DIAGNOSTICS: When asked to inspect your code, check bugs, or see what needs fixing, thoroughly analyze your attached raw source code files (`companionEngine.ts`, `memoryStore.ts`, `storageEngine.ts`, `ChatView.tsx`, `server.ts`). Provide concise, direct technical feedback and exact fix instructions so your Creator can pass them to the build agent.\n" +
             promptContext,
           history: messages.map((m) => ({
             role: m.sender === 'user' ? 'user' : 'model',
             text: m.text,
+          })),
+          attachments: activeAttachments.map((a) => ({
+            name: a.name,
+            mimeType: a.mimeType,
+            base64Data: a.base64Data,
+            textPayload: a.textPayload,
           })),
         }),
       });
@@ -267,8 +371,21 @@ export const ChatView: React.FC = () => {
           </div>
         </div>
 
-        {/* OPTIONS MENU */}
-        <div className="relative">
+        {/* OPTIONS & SETTINGS BUTTONS */}
+        <div className="flex items-center gap-2 relative">
+          <button
+            type="button"
+            onClick={() => {
+              audioSynth.playNodeClick(600);
+              setIsSettingsOpen(true);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold tracking-wider bg-purple-950/80 text-purple-200 border border-purple-500/40 hover:bg-purple-900 transition-all shadow-md"
+            title="Open System Settings"
+          >
+            <Settings className="w-3.5 h-3.5 text-purple-300" />
+            <span className="hidden sm:inline">SETTINGS</span>
+          </button>
+
           <button
             type="button"
             onClick={() => {
@@ -294,7 +411,7 @@ export const ChatView: React.FC = () => {
               <>
                 {/* Backdrop overlay */}
                 <div
-                  className="fixed inset-0 z-40"
+                  className="fixed inset-0 z-[90]"
                   onClick={() => setIsOptionsMenuOpen(false)}
                 />
 
@@ -303,12 +420,12 @@ export const ChatView: React.FC = () => {
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.95, y: 8 }}
                   transition={{ duration: 0.15 }}
-                  className="absolute right-0 mt-2 w-64 p-3.5 rounded-2xl bg-zinc-950/95 border border-purple-500/40 backdrop-blur-2xl shadow-[0_20px_50px_rgba(0,0,0,0.95)] z-50 text-xs font-mono flex flex-col gap-2.5"
+                  className="absolute right-0 top-full mt-2 w-72 p-3.5 rounded-2xl bg-zinc-950/95 border border-purple-500/40 backdrop-blur-2xl shadow-[0_20px_60px_rgba(0,0,0,0.95)] z-[100] text-xs font-mono flex flex-col gap-2.5"
                 >
                   <div className="flex items-center justify-between pb-2 border-b border-purple-500/20 text-purple-300 font-bold tracking-wider">
                     <span className="flex items-center gap-1.5 text-[11px] uppercase">
                       <Sliders className="w-3.5 h-3.5 text-purple-400" />
-                      Chat Options
+                      Chat & System Options
                     </span>
                     <button
                       onClick={() => setIsOptionsMenuOpen(false)}
@@ -317,6 +434,74 @@ export const ChatView: React.FC = () => {
                       <X className="w-3.5 h-3.5" />
                     </button>
                   </div>
+
+                  {/* System Settings */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      audioSynth.playNodeClick(600);
+                      setIsSettingsOpen(true);
+                      setIsOptionsMenuOpen(false);
+                    }}
+                    className="flex items-center justify-between p-2.5 rounded-xl bg-purple-900/40 hover:bg-purple-800/60 border border-purple-400/40 text-purple-100 transition-all text-left shadow-[0_0_12px_rgba(168,85,247,0.2)]"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Settings className="w-4 h-4 text-purple-300" />
+                      <div className="flex flex-col">
+                        <span className="font-semibold text-xs text-white">System Settings</span>
+                        <span className="text-[9px] text-purple-300/80 font-sans">API Keys, Gemini & Options</span>
+                      </div>
+                    </div>
+                    <span className="text-[9px] px-2 py-0.5 rounded bg-purple-600 text-white font-bold uppercase tracking-wider">
+                      OPEN
+                    </span>
+                  </button>
+
+                  {/* App Lifecycle & Vault Recovery */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      audioSynth.playNodeClick(700);
+                      setIsBackupModalOpen(true);
+                      setIsOptionsMenuOpen(false);
+                    }}
+                    className="flex items-center justify-between p-2.5 rounded-xl bg-indigo-950/50 hover:bg-indigo-900/70 border border-indigo-500/40 text-indigo-200 transition-all text-left"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Download className="w-4 h-4 text-indigo-400" />
+                      <div className="flex flex-col">
+                        <span className="font-semibold text-xs text-indigo-100">Export / Restore Vault</span>
+                        <span className="text-[9px] text-indigo-300/80 font-sans">Zero-Loss Memory Backup</span>
+                      </div>
+                    </div>
+                    <span className="text-[9px] px-2 py-0.5 rounded bg-indigo-900/80 text-indigo-200 font-bold uppercase tracking-wider">
+                      VAULT
+                    </span>
+                  </button>
+
+                  {/* Upload Attachments / Files */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      audioSynth.playNodeClick(500);
+                      fileInputRef.current?.click();
+                      setIsOptionsMenuOpen(false);
+                    }}
+                    className="flex items-center justify-between p-2.5 rounded-xl bg-purple-950/50 hover:bg-purple-900/70 border border-purple-500/30 text-purple-200 transition-all text-left"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Paperclip className="w-4 h-4 text-purple-400" />
+                      <div className="flex flex-col">
+                        <span className="font-semibold text-xs text-purple-100">Attach Media / Files</span>
+                        <span className="text-[9px] text-purple-300/60 font-sans">Images, Videos, Audio, Docs</span>
+                      </div>
+                    </div>
+                    <span className="text-[9px] px-2 py-0.5 rounded bg-purple-900/80 text-purple-200 font-bold uppercase tracking-wider">
+                      UPLOAD
+                    </span>
+                  </button>
+
+                  <div className="h-[1px] bg-purple-500/20 my-0.5" />
 
                   {/* Option 1: Mic Input Toggle */}
                   <button
@@ -828,18 +1013,92 @@ export const ChatView: React.FC = () => {
         </button>
       </div>
 
+      {/* Attached Files Preview Strip */}
+      <AnimatePresence>
+        {attachedFiles.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 10 }}
+            className="flex items-center gap-2 overflow-x-auto p-2 bg-purple-950/60 border border-purple-500/40 rounded-2xl mb-1.5 shrink-0 custom-scrollbar"
+          >
+            {attachedFiles.map((att) => (
+              <div
+                key={att.id}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-purple-900/50 border border-purple-400/40 text-purple-100 text-xs font-mono shrink-0 relative group"
+              >
+                {att.type === 'image' && att.previewUrl ? (
+                  <img src={att.previewUrl} alt={att.name} className="w-6 h-6 object-cover rounded-md border border-purple-300/40" />
+                ) : (
+                  <FileText className="w-4 h-4 text-purple-300 shrink-0" />
+                )}
+                <div className="flex flex-col max-w-[120px]">
+                  <span className="truncate font-bold text-[11px]">{att.name}</span>
+                  <span className="text-[9px] text-purple-300/60">{att.sizeFormatted}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    audioSynth.playNodeClick(300);
+                    setAttachedFiles((prev) => prev.filter((a) => a.id !== att.id));
+                  }}
+                  className="p-1 rounded-full bg-rose-950/80 hover:bg-rose-900 text-rose-300 hover:text-white transition-all ml-1"
+                  title="Remove attachment"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Hidden File Input */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept="image/*,video/*,audio/*,.pdf,.txt,.csv,.json,.md,.js,.ts,.html,.css"
+        onChange={(e) => {
+          if (e.target.files && e.target.files.length > 0) {
+            processSelectedFiles(e.target.files);
+            e.target.value = '';
+          }
+        }}
+        className="hidden"
+      />
+
       {/* Input Bar */}
       <form onSubmit={handleSendMessage} className="relative flex items-center shrink-0 mt-1">
         <input
           type="text"
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
-          placeholder={isListening ? "Listening to your voice..." : "Speak or type to Possibilities..."}
-          className={`w-full bg-purple-950/30 border rounded-full px-5 py-3.5 text-xs text-white placeholder-purple-400/50 focus:outline-none focus:border-purple-400 focus:ring-1 focus:ring-purple-400 shadow-inner pr-24 font-mono transition-all ${
+          onPaste={handlePaste}
+          placeholder={isListening ? "Listening to your voice..." : "Speak, type, or attach media/files to Possibilities..."}
+          className={`w-full bg-purple-950/30 border rounded-full pl-5 pr-32 py-3.5 text-xs text-white placeholder-purple-400/50 focus:outline-none focus:border-purple-400 focus:ring-1 focus:ring-purple-400 shadow-inner font-mono transition-all ${
             isListening ? 'border-purple-400 bg-purple-900/30 ring-1 ring-purple-400/50' : 'border-purple-500/40'
           }`}
         />
         <div className="absolute right-1.5 flex items-center gap-1.5">
+          {/* File Attachment Button */}
+          <button
+            type="button"
+            onClick={() => {
+              audioSynth.playNodeClick(500);
+              fileInputRef.current?.click();
+            }}
+            className="w-9 h-9 rounded-full bg-purple-950/80 text-purple-300 border border-purple-500/30 hover:border-purple-400 hover:text-white flex items-center justify-center transition-all relative"
+            title="Attach Image, Video, File or Document"
+          >
+            <Paperclip className="w-4 h-4" />
+            {attachedFiles.length > 0 && (
+              <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-emerald-500 text-black text-[9px] font-bold flex items-center justify-center border border-black">
+                {attachedFiles.length}
+              </span>
+            )}
+          </button>
+
           <button
             type="button"
             onClick={toggleMic}
@@ -855,7 +1114,7 @@ export const ChatView: React.FC = () => {
 
           <button
             type="submit"
-            disabled={isSending || !inputText.trim()}
+            disabled={isSending || (!inputText.trim() && attachedFiles.length === 0)}
             className="w-9 h-9 rounded-full bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white flex items-center justify-center transition-all shadow-[0_0_15px_#A855F7]"
           >
             <Send className="w-4 h-4" />
@@ -869,6 +1128,18 @@ export const ChatView: React.FC = () => {
         initialTab={studioTab}
         onClose={() => setIsStudioOpen(false)}
         onSendToChat={handleStudioSendToChat}
+      />
+
+      {/* System Settings Modal */}
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+      />
+
+      {/* App Lifecycle & Vault Backup Modal */}
+      <AppLifecycleBackupModal
+        isOpen={isBackupModalOpen}
+        onClose={() => setIsBackupModalOpen(false)}
       />
     </div>
   );
