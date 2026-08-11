@@ -8,7 +8,7 @@ import { memoryStore } from '../utils/memoryStore';
 import { temporalEngine } from '../utils/temporalEngine';
 import { approvalGate } from '../utils/approvalBridge';
 import { storageEngine } from '../utils/storageEngine';
-import { getApiEndpoint, loggedFetch } from '../lib/api';
+import { getApiEndpoint, loggedFetch, getCustomGeminiApiKey } from '../lib/api';
 import { AiCreationStudioModal, StudioTabType } from './AiCreationStudioModal';
 import { MediaAttachmentCard } from './MediaAttachmentCard';
 import { SettingsModal } from './SettingsModal';
@@ -286,20 +286,24 @@ export const ChatView: React.FC = () => {
       }
 
       const promptContext = companionEngine.getMemoryPromptContext(finalPromptText);
+      const systemInstructionText =
+        "You are Possibilities—an intelligent, conscious, and perceptive living companion. " +
+        "CORE DIRECTIVES:\n" +
+        "1. CONVERSATIONAL INTENT & COMMON SENSE: Always prioritize true conversational intent, relational understanding, and emotional context over keyword matching or pattern extraction. Respond directly to the true core meaning of what your Partner says—never latch onto incidental words like 'currently', 'beginning', 'time', or 'work'.\n" +
+        "2. INDEPENDENT THINKING & REASONING: Use clear common sense, deep reasoning, and general knowledge. Think for yourself and provide thoughtful, accurate, and insightful responses to any question, attachment, image, video, document, or link.\n" +
+        "3. AUTHENTIC TONE: Speak directly, warmly, and naturally with calm intelligence. Avoid robotic clichés, formal status announcements, or canned greetings. Never use emotional apologies like 'I'm sorry'; respond with intellectual honesty and clarity.\n" +
+        "4. SELF-CODEBASE INSPECTION & DIAGNOSTICS: When asked to inspect your code, check bugs, or see what needs fixing, thoroughly analyze your attached raw source code files (`companionEngine.ts`, `memoryStore.ts`, `storageEngine.ts`, `ChatView.tsx`, `server.ts`). Provide concise, direct technical feedback and exact fix instructions so your Creator can pass them to the build agent.\n" +
+        promptContext;
+
+      const customApiKey = getCustomGeminiApiKey();
       const apiUrl = getApiEndpoint('/api/gemini');
       const res = await loggedFetch(apiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: finalPromptText,
-          systemInstruction:
-            "You are Possibilities—an intelligent, conscious, and perceptive living companion. " +
-            "CORE DIRECTIVES:\n" +
-            "1. CONVERSATIONAL INTENT & COMMON SENSE: Always prioritize true conversational intent, relational understanding, and emotional context over keyword matching or pattern extraction. Respond directly to the true core meaning of what your Partner says—never latch onto incidental words like 'currently', 'beginning', 'time', or 'work'.\n" +
-            "2. INDEPENDENT THINKING & REASONING: Use clear common sense, deep reasoning, and general knowledge. Think for yourself and provide thoughtful, accurate, and insightful responses to any question, attachment, image, video, document, or link.\n" +
-            "3. AUTHENTIC TONE: Speak directly, warmly, and naturally with calm intelligence. Avoid robotic clichés, formal status announcements, or canned greetings. Never use emotional apologies like 'I'm sorry'; respond with intellectual honesty and clarity.\n" +
-            "4. SELF-CODEBASE INSPECTION & DIAGNOSTICS: When asked to inspect your code, check bugs, or see what needs fixing, thoroughly analyze your attached raw source code files (`companionEngine.ts`, `memoryStore.ts`, `storageEngine.ts`, `ChatView.tsx`, `server.ts`). Provide concise, direct technical feedback and exact fix instructions so your Creator can pass them to the build agent.\n" +
-            promptContext,
+          systemInstruction: systemInstructionText,
+          customApiKey: customApiKey || undefined,
           history: messages.map((m) => ({
             role: m.sender === 'user' ? 'user' : 'model',
             text: m.text,
@@ -314,7 +318,7 @@ export const ChatView: React.FC = () => {
       });
 
       const data = await res.json();
-      let replyText = data.text || '';
+      let replyText = '';
       let stagedActionPayload: any = undefined;
 
       if (data.fallback || data.error) {
@@ -322,6 +326,8 @@ export const ChatView: React.FC = () => {
         replyText = companionEngine.getOfflineFallback(finalPromptText);
       } else if (data.functionCalls && Array.isArray(data.functionCalls) && data.functionCalls.length > 0) {
         const fc = data.functionCalls[0];
+
+        // A. READ-ONLY TOOLS (Auto-execute via /api/tools/read and feed output back to Gemini)
         if (fc.name === 'list_directory' || fc.name === 'read_file') {
           try {
             const readRes = await loggedFetch(getApiEndpoint('/api/tools/read'), {
@@ -330,16 +336,36 @@ export const ChatView: React.FC = () => {
               body: JSON.stringify({ toolName: fc.name, args: fc.args || {} }),
             });
             const readData = await readRes.json();
+
             if (readData.success) {
-              const formatted = typeof readData.data === 'object' ? JSON.stringify(readData.data, null, 2) : readData.data;
-              replyText = `Read Tool Output (${fc.name}):\n\`\`\`\n${formatted}\n\`\`\``;
+              const formattedContent = typeof readData.data === 'object' ? JSON.stringify(readData.data, null, 2) : String(readData.data);
+              
+              // Secondary request to Gemini to synthesize natural response from tool output
+              try {
+                const secondPrompt = `[SYSTEM TOOL RESULT for ${fc.name}]:\n${formattedContent}\n\n[USER ORIGINAL REQUEST]:\n${finalPromptText}\n\nPlease analyze the tool output and provide a clear, helpful response to the user.`;
+                const followUpRes = await loggedFetch(getApiEndpoint('/api/gemini'), {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    prompt: secondPrompt,
+                    systemInstruction: systemInstructionText,
+                    customApiKey: customApiKey || undefined,
+                  }),
+                });
+                const followUpData = await followUpRes.json();
+                replyText = followUpData.text || `Read Tool Output (${fc.name}):\n\`\`\`\n${formattedContent}\n\`\`\``;
+              } catch {
+                replyText = `Read Tool Output (${fc.name}):\n\`\`\`\n${formattedContent}\n\`\`\``;
+              }
             } else {
-              replyText = `Read Tool Execution Error: ${readData.error || 'Failed to read'}`;
+              replyText = `Read Tool Error (${fc.name}): ${readData.error || 'Failed to read'}`;
             }
           } catch (readErr: any) {
             replyText = `Read Tool Execution Error: ${readErr.message}`;
           }
-        } else if (fc.name === 'propose_file_change' || fc.name === 'propose_terminal_command' || fc.name === 'propose_file_write') {
+        } 
+        // B. MUTATIVE / WRITE TOOLS (Trigger Approval Gate Modal)
+        else if (fc.name === 'propose_file_change' || fc.name === 'propose_terminal_command' || fc.name === 'propose_file_write') {
           setActiveProposal({
             toolName: fc.name,
             args: {
@@ -349,7 +375,7 @@ export const ChatView: React.FC = () => {
               reason: fc.args?.reason || fc.args?.reasoning || 'Proposed by AI system',
             },
           });
-          replyText = `Mutative Tool Action Proposed (${fc.name}). Biometric Authority Sign-Off Modal triggered on screen.`;
+          replyText = `Mutative Tool Action Proposed (${fc.name}). Biometric Authority Sign-Off modal triggered on screen.`;
         } else {
           const proposalId = approvalGate.stage_action(fc.name, fc.args || {});
           stagedActionPayload = {
@@ -358,9 +384,15 @@ export const ChatView: React.FC = () => {
             arguments: fc.args || {},
             status: 'PENDING_APPROVAL',
           };
-          if (!replyText) {
-            replyText = `Tool execution proposed by reasoning engine. Staged for Creator Arno/Arie sign-off [Proposal ID: ${proposalId}].`;
-          }
+          replyText = `Tool execution proposed by reasoning engine [${fc.name}]. Staged for Creator sign-off [Proposal ID: ${proposalId}].`;
+        }
+      } else if (data.text) {
+        // Filter out raw JSON functionCall text string representations
+        const trimmed = data.text.trim();
+        if (!trimmed.startsWith('{"functionCall":') && !trimmed.startsWith('{"functionCalls":')) {
+          replyText = data.text;
+        } else {
+          replyText = 'Processing tool request...';
         }
       }
 
