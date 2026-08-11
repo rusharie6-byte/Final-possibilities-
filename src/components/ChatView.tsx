@@ -145,6 +145,29 @@ export const ChatView: React.FC = () => {
     scrollToBottom();
   }, [messages, isSending]);
 
+  useEffect(() => {
+    return () => {
+      attachedFiles.forEach((att) => {
+        if (att.previewUrl) {
+          URL.revokeObjectURL(att.previewUrl);
+        }
+      });
+    };
+  }, [attachedFiles]);
+
+  const readFileAsBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const res = reader.result as string;
+        const base64 = res.split(',')[1] || res;
+        resolve(base64);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  };
+
   const processSelectedFiles = async (files: FileList | File[]) => {
     const newAttachments: AttachedFileItem[] = [];
     for (let i = 0; i < files.length; i++) {
@@ -164,24 +187,12 @@ export const ChatView: React.FC = () => {
 
       if (type === 'image' || type === 'audio' || type === 'video') {
         previewUrl = URL.createObjectURL(file);
-        const buffer = await file.arrayBuffer();
-        const bytes = new Uint8Array(buffer);
-        let binary = '';
-        for (let b = 0; b < bytes.byteLength; b++) {
-          binary += String.fromCharCode(bytes[b]);
-        }
-        base64Data = btoa(binary);
+        base64Data = await readFileAsBase64(file);
       } else {
         try {
           textPayload = await file.text();
         } catch {
-          const buffer = await file.arrayBuffer();
-          const bytes = new Uint8Array(buffer);
-          let binary = '';
-          for (let b = 0; b < bytes.byteLength; b++) {
-            binary += String.fromCharCode(bytes[b]);
-          }
-          base64Data = btoa(binary);
+          base64Data = await readFileAsBase64(file);
         }
       }
 
@@ -272,7 +283,7 @@ export const ChatView: React.FC = () => {
         return;
       }
 
-      const promptContext = companionEngine.getMemoryPromptContext();
+      const promptContext = companionEngine.getMemoryPromptContext(finalPromptText);
       const apiUrl = getApiEndpoint('/api/gemini');
       const res = await loggedFetch(apiUrl, {
         method: 'POST',
@@ -304,7 +315,10 @@ export const ChatView: React.FC = () => {
       let replyText = data.text || '';
       let stagedActionPayload: any = undefined;
 
-      if (data.functionCalls && Array.isArray(data.functionCalls) && data.functionCalls.length > 0) {
+      if (data.fallback || data.error) {
+        setOfflineNotice('Cloud AI temporarily busy/offline. Operating via Local Companion Engine.');
+        replyText = companionEngine.getOfflineFallback(finalPromptText);
+      } else if (data.functionCalls && Array.isArray(data.functionCalls) && data.functionCalls.length > 0) {
         const fc = data.functionCalls[0];
         const proposalId = approvalGate.stage_action(fc.name, fc.args || {});
         stagedActionPayload = {
@@ -358,7 +372,30 @@ export const ChatView: React.FC = () => {
   };
 
   return (
-    <div className="w-full max-w-4xl mx-auto h-[80vh] flex flex-col justify-between p-4 md:p-6 text-purple-100">
+    <div
+      onDragOver={(e) => {
+        e.preventDefault();
+        setIsDragOver(true);
+      }}
+      onDragLeave={(e) => {
+        e.preventDefault();
+        setIsDragOver(false);
+      }}
+      onDrop={async (e) => {
+        e.preventDefault();
+        setIsDragOver(false);
+        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+          await processSelectedFiles(e.dataTransfer.files);
+        }
+      }}
+      style={{
+        paddingTop: 'max(1rem, env(safe-area-inset-top))',
+        paddingBottom: 'max(1rem, env(safe-area-inset-bottom))',
+      }}
+      className={`w-full max-w-4xl mx-auto h-[80vh] flex flex-col justify-between p-4 md:p-6 text-purple-100 transition-all ${
+        isDragOver ? 'ring-2 ring-purple-400 bg-purple-950/20' : ''
+      }`}
+    >
       {/* Header */}
       <div className="flex items-center justify-between border-b border-purple-500/20 pb-4 mb-4 shrink-0 relative z-30">
         <div className="flex items-center gap-3">
@@ -1040,9 +1077,10 @@ export const ChatView: React.FC = () => {
                   type="button"
                   onClick={() => {
                     audioSynth.playNodeClick(300);
+                    if (att.previewUrl) URL.revokeObjectURL(att.previewUrl);
                     setAttachedFiles((prev) => prev.filter((a) => a.id !== att.id));
                   }}
-                  className="p-1 rounded-full bg-rose-950/80 hover:bg-rose-900 text-rose-300 hover:text-white transition-all ml-1"
+                  className="p-2 rounded-full bg-rose-950/80 hover:bg-rose-900 text-rose-300 hover:text-white transition-all ml-1 shrink-0"
                   title="Remove attachment"
                 >
                   <X className="w-3 h-3" />

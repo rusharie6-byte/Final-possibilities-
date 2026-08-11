@@ -496,14 +496,7 @@ export class CompanionEngine {
   }
 
   public editCoreMemory(id: string, newText: string): boolean {
-    const core = memoryStore.getCoreMemories();
-    const target = core.find((m) => m.id === id);
-    if (target) {
-      memoryStore.removeCoreMemory(id);
-      memoryStore.addCoreMemory(newText, target.category);
-      return true;
-    }
-    return false;
+    return memoryStore.editCoreMemory(id, newText);
   }
 
   public recordReflection(

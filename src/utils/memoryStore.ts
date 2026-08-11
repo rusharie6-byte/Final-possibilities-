@@ -599,9 +599,30 @@ export class MemoryStore {
   }
 
   public removeCoreMemory(id: string): boolean {
+    if (constitutionIntegrity.isCircuitBreakerActive()) {
+      console.warn('[CIRCUIT BREAKER ACTIVE] Memory deletion suspended: removeCoreMemory');
+      return false;
+    }
     const lenBefore = this.coreMemories.length;
     this.coreMemories = this.coreMemories.filter((m) => m.id !== id);
     if (this.coreMemories.length < lenBefore) {
+      this.saveToStorage();
+      return true;
+    }
+    return false;
+  }
+
+  public editCoreMemory(id: string, newText: string): boolean {
+    if (constitutionIntegrity.isCircuitBreakerActive()) return false;
+    const target = this.coreMemories.find((m) => m.id === id);
+    if (target) {
+      target.text = newText.trim();
+      const prov = this.provenanceList.find((p) => p.id === `prov-${id}`);
+      if (prov) {
+        prov.content = newText.trim();
+        prov.updatedAt = new Date().toISOString();
+        prov.version = (prov.version || 1) + 1;
+      }
       this.saveToStorage();
       return true;
     }
@@ -799,6 +820,7 @@ export class MemoryStore {
     this.temporaryRules = [];
     this.reflectionLogs = [];
 
+    this.enforceCreatorIdentity();
     this.saveToStorage();
     return { backupSnapshotId: snapshot.snapshotId };
   }

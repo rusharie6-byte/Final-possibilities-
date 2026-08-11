@@ -88,7 +88,7 @@ async function startServer() {
           },
         });
         const testResponse = await ai.models.generateContent({
-          model: "gemini-3.6-flash",
+          model: "gemini-2.5-flash",
           contents: "ping",
         });
         if (testResponse && testResponse.text) {
@@ -222,11 +222,8 @@ async function startServer() {
         }
       }
 
-      // Direct call to primary supported model gemini-3.6-flash with Possibilities Tool Schemas and Google Search Grounding
+      // Clean tool declarations with Function Declarations
       const toolDeclarations = [
-        {
-          googleSearch: {}
-        },
         {
           functionDeclarations: [
             {
@@ -278,11 +275,21 @@ async function startServer() {
         config.systemInstruction = systemInstruction;
       }
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3.6-flash",
-        contents: contents,
-        config,
-      });
+      let response: any;
+      try {
+        response = await ai.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: contents,
+          config,
+        });
+      } catch (firstErr: any) {
+        console.warn("Primary model attempt failed, falling back to gemini-2.5-flash:", firstErr?.message);
+        response = await ai.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: contents,
+          config,
+        });
+      }
 
       const functionCalls = response.functionCalls || [];
 

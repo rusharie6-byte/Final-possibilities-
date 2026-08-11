@@ -12,10 +12,11 @@ const PUBLIC_VAULT_STORAGE_KEY = 'Documents/Possibilities/possibilities_vault.js
 // Robust Base64 vault encoding/decoding helper
 export function encryptVault(plainText: string): string {
   try {
+    const encoded = encodeURIComponent(plainText);
     if (typeof Buffer !== 'undefined') {
-      return Buffer.from(plainText, 'utf-8').toString('base64');
+      return Buffer.from(encoded, 'utf-8').toString('base64');
     }
-    return btoa(encodeURIComponent(plainText));
+    return btoa(encoded);
   } catch (e) {
     return btoa(plainText);
   }
@@ -23,12 +24,19 @@ export function encryptVault(plainText: string): string {
 
 export function decryptVault(cipherText: string): string {
   try {
+    let raw = '';
     if (typeof Buffer !== 'undefined') {
-      return Buffer.from(cipherText, 'base64').toString('utf-8');
+      raw = Buffer.from(cipherText, 'base64').toString('utf-8');
+    } else {
+      raw = atob(cipherText);
     }
-    return decodeURIComponent(atob(cipherText));
+    try {
+      return decodeURIComponent(raw);
+    } catch {
+      return raw;
+    }
   } catch (e) {
-    return atob(cipherText);
+    return cipherText;
   }
 }
 

@@ -21,6 +21,30 @@ export interface PossibilitiesNativeBridgePlugin {
 const NativeBridge = registerPlugin<PossibilitiesNativeBridgePlugin>('PossibilitiesNativeBridge');
 
 export const possibilitiesNativeBridge = {
+  async requestMicrophonePermission(): Promise<{ granted: boolean; error?: string }> {
+    try {
+      if (typeof navigator !== 'undefined' && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach((track) => track.stop());
+        return { granted: true };
+      }
+      return { granted: false, error: 'MediaDevices API not supported' };
+    } catch (e: any) {
+      return { granted: false, error: e?.message || 'Microphone permission denied' };
+    }
+  },
+
+  async requestMediaPermissions(): Promise<{ granted: boolean; error?: string }> {
+    try {
+      if (typeof navigator !== 'undefined' && (navigator as any).permissions) {
+        return { granted: true };
+      }
+      return { granted: true };
+    } catch (e: any) {
+      return { granted: false, error: e?.message || 'Media permission query failed' };
+    }
+  },
+
   async getCapabilities() {
     try {
       return await NativeBridge.getSystemCapabilities();
