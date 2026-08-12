@@ -216,11 +216,31 @@ app.post("/api/gemini", async (req, res) => {
       });
     }
 
-    const functionCalls = response.functionCalls || response.candidates?.[0]?.content?.parts?.filter((p: any) => p.functionCall).map((p: any) => p.functionCall);
+    // Robust function call extraction across response.functionCalls and candidates
+    const extractFunctionCalls = (resp: any) => {
+      if (!resp) return [];
+      if (Array.isArray(resp.functionCalls) && resp.functionCalls.length > 0) return resp.functionCalls;
+
+      const fcs: any[] = [];
+      if (Array.isArray(resp.candidates)) {
+        for (const c of resp.candidates) {
+          const parts = c?.content?.parts || [];
+          for (const p of parts) {
+            if (p.functionCall) fcs.push(p.functionCall);
+            // Some SDK variants nest functionCall differently
+            if (p?.content?.functionCall) fcs.push(p.content.functionCall);
+            if (p?.function_call) fcs.push(p.function_call);
+          }
+        }
+      }
+      return fcs;
+    };
+
+    const functionCalls = extractFunctionCalls(response);
 
     res.json({
       text: response.text || null,
-      functionCalls: functionCalls || null,
+      functionCalls: functionCalls.length > 0 ? functionCalls : null,
       candidates: response.candidates,
       usageMetadata: response.usageMetadata,
     });
