@@ -6,10 +6,13 @@
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "postbuild": "node ./scripts/sync-server-to-assets.js",
     "start": "node dist/server.cjs",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "android-build-sync": "npm run build && npx cap copy android && npx cap sync android",
+    "ios-build-sync": "npm run build && npx cap copy ios && npx cap sync ios"
   },
   "dependencies": {
     "@capacitor/filesystem": "^8.1.2",
