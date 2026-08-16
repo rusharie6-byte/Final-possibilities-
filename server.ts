@@ -216,31 +216,11 @@ app.post("/api/gemini", async (req, res) => {
       });
     }
 
-    // Robust function call extraction across response.functionCalls and candidates
-    const extractFunctionCalls = (resp: any) => {
-      if (!resp) return [];
-      if (Array.isArray(resp.functionCalls) && resp.functionCalls.length > 0) return resp.functionCalls;
-
-      const fcs: any[] = [];
-      if (Array.isArray(resp.candidates)) {
-        for (const c of resp.candidates) {
-          const parts = c?.content?.parts || [];
-          for (const p of parts) {
-            if (p.functionCall) fcs.push(p.functionCall);
-            // Some SDK variants nest functionCall differently
-            if (p?.content?.functionCall) fcs.push(p.content.functionCall);
-            if (p?.function_call) fcs.push(p.function_call);
-          }
-        }
-      }
-      return fcs;
-    };
-
-    const functionCalls = extractFunctionCalls(response);
+    const functionCalls = response.functionCalls || response.candidates?.[0]?.content?.parts?.filter((p: any) => p.functionCall).map((p: any) => p.functionCall);
 
     res.json({
       text: response.text || null,
-      functionCalls: functionCalls.length > 0 ? functionCalls : null,
+      functionCalls: functionCalls || null,
       candidates: response.candidates,
       usageMetadata: response.usageMetadata,
     });
@@ -299,6 +279,32 @@ app.post("/api/tools/execute", async (req, res) => {
     }
 
     return res.status(400).json({ error: "Unknown execution tool name." });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+const VAULT_SERVER_FILE = path.resolve(process.cwd(), "possibilities_vault_server.json");
+
+app.post("/api/vault/sync", async (req, res) => {
+  try {
+    const { payload } = req.body;
+    if (!payload) return res.status(400).json({ error: "Missing payload" });
+    await fs.writeFile(VAULT_SERVER_FILE, JSON.stringify(payload, null, 2), "utf-8");
+    return res.json({ status: "ok", message: "Vault synced to server disk." });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/vault/restore", async (req, res) => {
+  try {
+    if (!fsSync.existsSync(VAULT_SERVER_FILE)) {
+      return res.status(404).json({ error: "No vault backup found on server." });
+    }
+    const content = await fs.readFile(VAULT_SERVER_FILE, "utf-8");
+    const payload = JSON.parse(content);
+    return res.json({ status: "ok", payload });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
