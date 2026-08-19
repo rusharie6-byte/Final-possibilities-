@@ -314,8 +314,33 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
 
         const customApiKey = getCustomGeminiApiKey();
 
-        // 1. FIRST CHOICE: 100% Offline 3B Cognitive Core Engine (Default active)
-        if (!customApiKey) {
+        // Check backend AI generation first (uses server-side Gemini API or custom key)
+        let replyText: string | null = null;
+        try {
+          const apiUrl = getApiEndpoint('/api/gemini');
+          const res = await loggedFetch(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              prompt: userQuery,
+              systemInstruction: fullSystemInstruction,
+              customApiKey: customApiKey || undefined,
+              history: conversationHistory,
+            }),
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            if (data.text) {
+              replyText = data.text;
+            }
+          }
+        } catch (netErr) {
+          console.warn('[AI Pipeline] Backend endpoint unreachable, executing offline 3B engine:', netErr);
+        }
+
+        // If backend unavailable or returned null, use 100% Offline 3B Cognitive Core Engine
+        if (!replyText) {
           const local3BRes = await offline3BEngine.generateResponse(
             userQuery,
             conversationHistory.map((h) => ({
@@ -324,69 +349,18 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
             })),
             fullSystemInstruction
           );
-
-          const botMsg: ChatMsg = {
-            id: `p-${Date.now()}`,
-            sender: 'possibilities',
-            text: local3BRes.text,
-            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          };
-          setMessages((prev) => [...prev, botMsg]);
-          speakReply(local3BRes.text);
-          audioSynth.playEnergyBloom();
-        } else {
-          // 2. SECOND CHOICE (OPTIONAL ONLINE): Only when user enters a custom API key in Settings
-          try {
-            const apiUrl = getApiEndpoint('/api/gemini');
-            const res = await loggedFetch(apiUrl, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                prompt: userQuery,
-                systemInstruction: fullSystemInstruction,
-                customApiKey: customApiKey,
-                history: conversationHistory,
-              }),
-            });
-
-            if (!res.ok) {
-              throw new Error(`HTTP Error status ${res.status}`);
-            }
-
-            const data = await res.json();
-            const replyText = (data.fallback || data.error) 
-              ? (await offline3BEngine.generateResponse(userQuery, conversationHistory.map(h => ({ role: h.role === 'user' ? 'user' : 'model', text: h.text })), fullSystemInstruction)).text
-              : (data.text || 'I am listening, partner. How can I assist you with that?');
-
-            const botMsg: ChatMsg = {
-              id: `p-${Date.now()}`,
-              sender: 'possibilities',
-              text: replyText,
-              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            };
-            setMessages((prev) => [...prev, botMsg]);
-            speakReply(replyText);
-            audioSynth.playEnergyBloom();
-          } catch (err) {
-            console.warn('Online request fallback to 3B engine:', err);
-            const local3BRes = await offline3BEngine.generateResponse(
-              userQuery,
-              conversationHistory.map((h) => ({
-                role: h.role === 'user' ? 'user' : 'model',
-                text: h.text,
-              })),
-              fullSystemInstruction
-            );
-            const botMsg: ChatMsg = {
-              id: `p-${Date.now()}`,
-              sender: 'possibilities',
-              text: local3BRes.text,
-              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            };
-            setMessages((prev) => [...prev, botMsg]);
-            speakReply(local3BRes.text);
-          }
+          replyText = local3BRes.text;
         }
+
+        const botMsg: ChatMsg = {
+          id: `p-${Date.now()}`,
+          sender: 'possibilities',
+          text: replyText,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        };
+        setMessages((prev) => [...prev, botMsg]);
+        speakReply(replyText);
+        audioSynth.playEnergyBloom();
       } catch (e) {
         console.warn('Companion engine error:', e);
         const fallback = companionEngine.getOfflineFallback(userQuery);
@@ -761,8 +735,22 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
           </div>
         </div>
 
-        {/* TOP CONTROLS: SETTINGS BUTTON (OPTIONS MOVED TO SETTINGS) */}
+        {/* TOP CONTROLS: QUICK SAVE .MD + SETTINGS BUTTON */}
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              audioSynth.playOrbPulse(700, 0.25);
+              masterBundleEngine.downloadSingleMasterFile('markdown');
+              setBackupStatusNotice('Master System Blueprint (.md) saved! All 13 Laws & Memory Vault secured.');
+            }}
+            className="px-3 py-1.5 rounded-full border border-purple-500/50 bg-gradient-to-r from-purple-900/90 to-indigo-900/90 hover:from-purple-800 hover:to-indigo-800 text-white text-[11px] font-bold tracking-wide transition-all flex items-center gap-1.5 backdrop-blur-xl shadow-[0_0_15px_rgba(168,85,247,0.4)] cursor-pointer"
+            title="1-Click Save Master System Blueprint (.md)"
+          >
+            <Download className="w-3.5 h-3.5 text-purple-300" />
+            <span>SAVE .MD</span>
+          </button>
+
           <button
             type="button"
             onClick={() => {
