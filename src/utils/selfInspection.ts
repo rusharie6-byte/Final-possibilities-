@@ -50,10 +50,10 @@ export class SelfInspectionEngine {
         externalTools: profile.externalToolsAcknowledged,
       },
       mentalModel: {
-        androidShell: 'Body (Capacitor / Android App v1.2)',
-        memorySystem: 'Brain (Memory System v2.0 & Persistent Store v3.0)',
+        androidShell: 'Body (Capacitor / Android App Shell)',
+        memorySystem: 'Brain (Persistent Memory Store & Cortical Capsule Engine)',
         services: 'Organs (Express API, Gemini API Proxy, Web Audio Synthesizer)',
-        tools: 'Capabilities (Self-Inspect, File Access, Code Search, Patch Proposer, Backup/Restore)',
+        tools: 'Capabilities (Self-Inspect, File Access, Code Search, Capability Pipeline, Backup/Restore)',
         database: 'Persistent Memory Store',
       },
       session: {

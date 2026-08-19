@@ -1,0 +1,40 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Default Deny Catch-All
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidMemoryVault(data) {
+      return data.keys().hasAll(['userId', 'userEmail', 'vaultId', 'version', 'updatedAt', 'vaultPayloadJson']) &&
+             data.userId is string && data.userId.size() <= 128 &&
+             data.userEmail is string && data.userEmail.size() <= 256 &&
+             data.vaultId is string && data.vaultId.size() <= 128 &&
+             data.version is string && data.version.size() <= 32 &&
+             data.updatedAt is string && data.updatedAt.size() <= 64 &&
+             data.vaultPayloadJson is string && data.vaultPayloadJson.size() <= 1000000 &&
+             data.userId == request.auth.uid;
+    }
+
+    // Sovereign User Memory Vault
+    match /user_vaults/{userId} {
+      allow get: if isOwner(userId) && isValidId(userId);
+      allow create, update: if isOwner(userId) && isValidId(userId) && isValidMemoryVault(request.resource.data);
+      allow delete: if isOwner(userId) && isValidId(userId);
+    }
+  }
+}

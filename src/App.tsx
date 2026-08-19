@@ -13,7 +13,12 @@ import { AmbientParticlesCanvas } from './components/AmbientParticlesCanvas';
 import { SearchOverlay } from './components/SearchOverlay';
 import { SettingsModal } from './components/SettingsModal';
 import { DebugNetworkPanel } from './components/DebugNetworkPanel';
+import { FirstLaunchPermissionModal } from './components/FirstLaunchPermissionModal';
+import { CloudVaultManagerModal } from './components/CloudVaultManagerModal';
 import { audioSynth } from './utils/audioSynthesizer';
+import { memoryVaultManager } from './vault/MemoryVaultManager';
+import { auth, googleProvider } from './lib/firebase';
+import { signInWithPopup } from 'firebase/auth';
 
 export default function App() {
   // activeOverlay manages temporary overlays over the permanently mounted Home Companion Environment
@@ -21,6 +26,56 @@ export default function App() {
   const [systemMode, setSystemMode] = useState<SystemMode>('calm');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isCloudVaultOpen, setIsCloudVaultOpen] = useState(false);
+
+  // First launch permission request check
+  const [showFirstLaunchModal, setShowFirstLaunchModal] = useState<boolean>(false);
+  const [micGranted, setMicGranted] = useState<boolean>(false);
+  const [cloudGranted, setCloudGranted] = useState<boolean>(false);
+
+  useEffect(() => {
+    // 1. Check first launch status
+    const hasSeenOnboarding = localStorage.getItem('possibilities_onboarding_completed');
+    if (!hasSeenOnboarding) {
+      setShowFirstLaunchModal(true);
+    }
+
+    // 2. Automated memory restore across reinstall/open
+    memoryVaultManager.autoRestoreOnLaunchOrLogin().then((res) => {
+      if (res.restored) {
+        console.log(`[APP LAUNCH RESTORE] Recovered ${res.count} memory records from ${res.source}`);
+      }
+    });
+  }, []);
+
+  const handleGrantMicrophone = async () => {
+    try {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        await navigator.mediaDevices.getUserMedia({ audio: true });
+        setMicGranted(true);
+      } else {
+        setMicGranted(true);
+      }
+    } catch (err) {
+      console.warn('Microphone permission request note:', err);
+      setMicGranted(true); // Flag as attempted/handled
+    }
+  };
+
+  const handleGrantCloudBackup = async () => {
+    try {
+      await signInWithPopup(auth, googleProvider);
+      setCloudGranted(true);
+      await memoryVaultManager.syncToCloud();
+    } catch (err: any) {
+      console.warn('Cloud sign-in prompt note:', err);
+    }
+  };
+
+  const handleDismissFirstLaunch = () => {
+    localStorage.setItem('possibilities_onboarding_completed', 'true');
+    setShowFirstLaunchModal(false);
+  };
 
   // Global Keyboard Shortcuts
   useEffect(() => {
@@ -85,6 +140,10 @@ export default function App() {
       <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
+        onOpenPanel={(panelId) => {
+          setIsSettingsOpen(false);
+          setActiveOverlay(panelId);
+        }}
       />
 
       {/* On-Screen Network Debug Panel */}
@@ -98,6 +157,22 @@ export default function App() {
           onEnterNexus={() => {}}
           onOpenPanel={handleOpenPanelFromVoice}
           onSystemModeChange={(mode) => setSystemMode(mode)}
+        />
+
+        {/* First Launch Permissions Modal (Mic + Cloud Account Linking) */}
+        <FirstLaunchPermissionModal
+          isOpen={showFirstLaunchModal}
+          onGrantMicrophone={handleGrantMicrophone}
+          onGrantCloudBackup={handleGrantCloudBackup}
+          onDismiss={handleDismissFirstLaunch}
+          micGranted={micGranted}
+          cloudGranted={cloudGranted}
+        />
+
+        {/* Global Cloud Vault Manager Modal */}
+        <CloudVaultManagerModal
+          isOpen={isCloudVaultOpen}
+          onClose={() => setIsCloudVaultOpen(false)}
         />
 
         {/* TEMPORARY SUBSYSTEM OVERLAY SHEETS (FLOATS OVER HOME WHILE ORB & CONTROLS REMAIN VISIBLE) */}

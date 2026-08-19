@@ -92,26 +92,53 @@ export class StorageEngine {
     return false;
   }
 
-  // IndexedDB backup store initialization
+  // IndexedDB backup store initialization with robust error handling
   private initIndexedDB(): Promise<IDBDatabase | null> {
     if (typeof indexedDB === 'undefined') return Promise.resolve(null);
-    if (this.idb) return Promise.resolve(this.idb);
+    if (this.idb) {
+      try {
+        // Test if existing database instance is open and active
+        const testTx = this.idb.transaction('vault_store', 'readonly');
+        if (testTx) return Promise.resolve(this.idb);
+      } catch (err) {
+        // Connection was closed or invalid, reset reference
+        this.idb = null;
+      }
+    }
 
     return new Promise((resolve) => {
       try {
         const req = indexedDB.open('possibilities_vault_db', 1);
         req.onupgradeneeded = (e: any) => {
-          const db = e.target.result;
-          if (!db.objectStoreNames.contains('vault_store')) {
-            db.createObjectStore('vault_store');
-          }
+          try {
+            const db = e.target.result;
+            if (!db.objectStoreNames.contains('vault_store')) {
+              db.createObjectStore('vault_store');
+            }
+          } catch {}
         };
         req.onsuccess = (e: any) => {
           this.idb = e.target.result;
+          if (this.idb) {
+            this.idb.onclose = () => {
+              this.idb = null;
+            };
+            this.idb.onerror = () => {
+              this.idb = null;
+            };
+          }
           resolve(this.idb);
         };
-        req.onerror = () => resolve(null);
+        req.onerror = () => {
+          this.idb = null;
+          resolve(null);
+        };
+        req.onblocked = () => {
+          this.idb = null;
+          resolve(null);
+        };
       } catch {
+        this.idb = null;
         resolve(null);
       }
     });
@@ -122,13 +149,21 @@ export class StorageEngine {
       const db = await this.initIndexedDB();
       if (!db) return false;
       return new Promise((resolve) => {
-        const tx = db.transaction('vault_store', 'readwrite');
-        const store = tx.objectStore('vault_store');
-        const req = store.put(value, key);
-        req.onsuccess = () => resolve(true);
-        req.onerror = () => resolve(false);
+        try {
+          const tx = db.transaction('vault_store', 'readwrite');
+          tx.onerror = () => resolve(false);
+          tx.onabort = () => resolve(false);
+          const store = tx.objectStore('vault_store');
+          const req = store.put(value, key);
+          req.onsuccess = () => resolve(true);
+          req.onerror = () => resolve(false);
+        } catch {
+          this.idb = null;
+          resolve(false);
+        }
       });
     } catch {
+      this.idb = null;
       return false;
     }
   }
@@ -138,13 +173,21 @@ export class StorageEngine {
       const db = await this.initIndexedDB();
       if (!db) return null;
       return new Promise((resolve) => {
-        const tx = db.transaction('vault_store', 'readonly');
-        const store = tx.objectStore('vault_store');
-        const req = store.get(key);
-        req.onsuccess = () => resolve(req.result || null);
-        req.onerror = () => resolve(null);
+        try {
+          const tx = db.transaction('vault_store', 'readonly');
+          tx.onerror = () => resolve(null);
+          tx.onabort = () => resolve(null);
+          const store = tx.objectStore('vault_store');
+          const req = store.get(key);
+          req.onsuccess = () => resolve(req.result || null);
+          req.onerror = () => resolve(null);
+        } catch {
+          this.idb = null;
+          resolve(null);
+        }
       });
     } catch {
+      this.idb = null;
       return null;
     }
   }

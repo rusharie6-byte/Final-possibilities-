@@ -39,6 +39,7 @@ import {
   FileText,
   Gamepad2,
   Package,
+  FileCheck,
 } from 'lucide-react';
 import { SystemMode, MediaAttachment } from '../types';
 import { AmbientParticlesCanvas } from './AmbientParticlesCanvas';
@@ -48,7 +49,9 @@ import { audioSynth } from '../utils/audioSynthesizer';
 import { companionEngine } from '../utils/companionEngine';
 import { memoryStore } from '../utils/memoryStore';
 import { memoryVaultManager } from '../vault/MemoryVaultManager';
-import { getApiEndpoint, loggedFetch } from '../lib/api';
+import { masterBundleEngine } from '../utils/masterBundleEngine';
+import { offline3BEngine } from '../utils/offline3BEngine';
+import { getApiEndpoint, loggedFetch, getCustomGeminiApiKey } from '../lib/api';
 
 interface HomeCompanionViewProps {
   systemMode: SystemMode;
@@ -309,46 +312,80 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
           "4. AUTHENTIC TONE: Speak directly, warmly, and naturally with calm intelligence. Avoid robotic clichés or repeating 'Possibilities is present'." +
           memoryContext;
 
-        // Online Gemini AI Stream Fallback
-        try {
-          const apiUrl = getApiEndpoint('/api/gemini');
-          const res = await loggedFetch(apiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              prompt: userQuery,
-              systemInstruction: fullSystemInstruction,
-              history: conversationHistory,
-            }),
-          });
+        const customApiKey = getCustomGeminiApiKey();
 
-          if (!res.ok) {
-            throw new Error(`HTTP Error status ${res.status}`);
-          }
-
-          const data = await res.json();
-          const replyText = data.text || 'I am listening, partner. How can I assist you with that?';
+        // 1. FIRST CHOICE: 100% Offline 3B Cognitive Core Engine (Default active)
+        if (!customApiKey) {
+          const local3BRes = await offline3BEngine.generateResponse(
+            userQuery,
+            conversationHistory.map((h) => ({
+              role: h.role === 'user' ? 'user' : 'model',
+              text: h.text,
+            })),
+            fullSystemInstruction
+          );
 
           const botMsg: ChatMsg = {
             id: `p-${Date.now()}`,
             sender: 'possibilities',
-            text: replyText,
+            text: local3BRes.text,
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           };
           setMessages((prev) => [...prev, botMsg]);
-          speakReply(replyText);
+          speakReply(local3BRes.text);
           audioSynth.playEnergyBloom();
-        } catch (err) {
-          console.warn('Gemini request fallback:', err);
-          const fallback = companionEngine.getOfflineFallback(userQuery);
-          const botMsg: ChatMsg = {
-            id: `p-${Date.now()}`,
-            sender: 'possibilities',
-            text: fallback,
-            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          };
-          setMessages((prev) => [...prev, botMsg]);
-          speakReply(fallback);
+        } else {
+          // 2. SECOND CHOICE (OPTIONAL ONLINE): Only when user enters a custom API key in Settings
+          try {
+            const apiUrl = getApiEndpoint('/api/gemini');
+            const res = await loggedFetch(apiUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                prompt: userQuery,
+                systemInstruction: fullSystemInstruction,
+                customApiKey: customApiKey,
+                history: conversationHistory,
+              }),
+            });
+
+            if (!res.ok) {
+              throw new Error(`HTTP Error status ${res.status}`);
+            }
+
+            const data = await res.json();
+            const replyText = (data.fallback || data.error) 
+              ? (await offline3BEngine.generateResponse(userQuery, conversationHistory.map(h => ({ role: h.role === 'user' ? 'user' : 'model', text: h.text })), fullSystemInstruction)).text
+              : (data.text || 'I am listening, partner. How can I assist you with that?');
+
+            const botMsg: ChatMsg = {
+              id: `p-${Date.now()}`,
+              sender: 'possibilities',
+              text: replyText,
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            };
+            setMessages((prev) => [...prev, botMsg]);
+            speakReply(replyText);
+            audioSynth.playEnergyBloom();
+          } catch (err) {
+            console.warn('Online request fallback to 3B engine:', err);
+            const local3BRes = await offline3BEngine.generateResponse(
+              userQuery,
+              conversationHistory.map((h) => ({
+                role: h.role === 'user' ? 'user' : 'model',
+                text: h.text,
+              })),
+              fullSystemInstruction
+            );
+            const botMsg: ChatMsg = {
+              id: `p-${Date.now()}`,
+              sender: 'possibilities',
+              text: local3BRes.text,
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            };
+            setMessages((prev) => [...prev, botMsg]);
+            speakReply(local3BRes.text);
+          }
         }
       } catch (e) {
         console.warn('Companion engine error:', e);
@@ -724,245 +761,22 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
           </div>
         </div>
 
-        {/* TOP CONTROLS: SETTINGS & OPTIONS */}
-        <div className="flex items-center gap-2 relative">
+        {/* TOP CONTROLS: SETTINGS BUTTON (OPTIONS MOVED TO SETTINGS) */}
+        <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => {
               audioSynth.playNodeClick(500);
               onOpenPanel('settings');
             }}
-            className="px-3 py-1.5 rounded-full border border-purple-500/40 bg-purple-950/80 hover:bg-purple-900/90 text-purple-200 hover:text-white text-[11px] font-semibold tracking-wide transition-all flex items-center gap-1.5 backdrop-blur-xl shadow-[0_0_15px_rgba(168,85,247,0.3)]"
-            title="Open Possibilities App Settings"
+            className="px-3.5 py-1.5 rounded-full border border-purple-500/40 bg-purple-950/80 hover:bg-purple-900/90 text-purple-200 hover:text-white text-[11px] font-semibold tracking-wide transition-all flex items-center gap-1.5 backdrop-blur-xl shadow-[0_0_15px_rgba(168,85,247,0.3)] cursor-pointer"
+            title="Open Possibilities App Settings & Controls"
           >
             <Settings className="w-3.5 h-3.5 text-purple-300" />
             <span>SETTINGS</span>
           </button>
-
-          {/* OPTIONS MENU */}
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => {
-                audioSynth.playNodeClick(500);
-                setIsOptionsMenuOpen((prev) => !prev);
-              }}
-              className={`px-3 py-1.5 rounded-full border text-[11px] font-semibold tracking-wide transition-all flex items-center gap-1.5 backdrop-blur-xl ${
-                isOptionsMenuOpen || isMicActive
-                  ? 'bg-purple-600 text-white border-purple-400 shadow-[0_0_20px_rgba(168,85,247,0.5)]'
-                  : 'bg-zinc-900/90 text-purple-300 border-purple-500/30 hover:border-purple-400 hover:text-purple-100'
-              }`}
-              title="Open Companion Options Menu"
-            >
-              <Sliders className="w-3.5 h-3.5 text-purple-200" />
-              <span>OPTIONS</span>
-              {(isMicActive || !isPossibilitiesVoiceOn) && (
-                <span className="w-2 h-2 rounded-full bg-purple-400 animate-pulse" />
-              )}
-            </button>
-
-            <AnimatePresence>
-              {isOptionsMenuOpen && (
-                <>
-                  {/* Backdrop overlay to close menu on click outside */}
-                  <div
-                    className="fixed inset-0 z-40"
-                    onClick={() => setIsOptionsMenuOpen(false)}
-                  />
-
-                  <motion.div
-                    initial={{ opacity: 0, scale: 0.95, y: 8 }}
-                    animate={{ opacity: 1, scale: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.95, y: 8 }}
-                    transition={{ duration: 0.15 }}
-                    className="absolute right-0 mt-2 w-72 p-3.5 rounded-2xl bg-zinc-950/95 border border-purple-500/40 backdrop-blur-2xl shadow-[0_20px_50px_rgba(0,0,0,0.95)] z-50 text-xs font-mono flex flex-col gap-2.5"
-                  >
-                    <div className="flex items-center justify-between pb-2 border-b border-purple-500/20 text-purple-300 font-bold tracking-wider">
-                      <span className="flex items-center gap-1.5 text-[11px] uppercase">
-                        <Sliders className="w-3.5 h-3.5 text-purple-400" />
-                        Companion Controls
-                      </span>
-                      <button
-                        onClick={() => setIsOptionsMenuOpen(false)}
-                        className="p-1 rounded-full hover:bg-purple-900/40 text-purple-400 hover:text-white transition-all"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-
-                    {/* Option 0: System Settings & API Keys */}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        audioSynth.playNodeClick(600);
-                        onOpenPanel('settings');
-                        setIsOptionsMenuOpen(false);
-                      }}
-                      className="flex items-center justify-between p-2.5 rounded-xl bg-purple-900/40 hover:bg-purple-800/60 border border-purple-400/40 text-purple-100 transition-all text-left shadow-[0_0_12px_rgba(168,85,247,0.2)]"
-                    >
-                      <div className="flex items-center gap-2">
-                        <Settings className="w-4 h-4 text-purple-300" />
-                        <div className="flex flex-col">
-                          <span className="font-semibold text-xs text-white">System Settings</span>
-                          <span className="text-[9px] text-purple-300/80 font-sans">API Key, Backend URL & Performance</span>
-                        </div>
-                      </div>
-                      <span className="text-[9px] px-2 py-0.5 rounded bg-purple-600 text-white font-bold uppercase tracking-wider">
-                        OPEN
-                      </span>
-                    </button>
-
-                  {/* Option 1: Memory Vault Panel */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      audioSynth.playNodeClick(600);
-                      onOpenPanel('memory');
-                      setIsOptionsMenuOpen(false);
-                    }}
-                    className="flex items-center justify-between p-2.5 rounded-xl bg-purple-950/50 hover:bg-purple-900/70 border border-purple-500/30 text-purple-200 transition-all text-left"
-                  >
-                    <div className="flex items-center gap-2">
-                      <Brain className="w-4 h-4 text-purple-400" />
-                      <div className="flex flex-col">
-                        <span className="font-semibold text-xs text-purple-100">Memory Vault</span>
-                        <span className="text-[9px] text-purple-300/60 font-sans">View & edit stored memory</span>
-                      </div>
-                    </div>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-900/80 border border-purple-400/40 text-purple-200 font-bold">
-                      {companionEngine.getLongTermMemories().length}
-                    </span>
-                  </button>
-
-                  {/* Option 2: Self Backup (Choose Location & Preserve Reinstall) */}
-                  <button
-                    type="button"
-                    onClick={handleSelfBackup}
-                    className="flex items-center justify-between p-2.5 rounded-xl bg-emerald-950/40 hover:bg-emerald-900/60 border border-emerald-500/30 text-emerald-200 transition-all text-left"
-                  >
-                    <div className="flex items-center gap-2">
-                      <Download className="w-4 h-4 text-emerald-400" />
-                      <div className="flex flex-col">
-                        <span className="font-semibold text-xs text-emerald-100">Self Backup</span>
-                        <span className="text-[9px] text-emerald-300/60 font-sans">Export encrypted .vault file</span>
-                      </div>
-                    </div>
-                    <span className="text-[9px] px-2 py-0.5 rounded bg-emerald-900/80 text-emerald-200 font-bold uppercase tracking-wider">
-                      SAVE
-                    </span>
-                  </button>
-
-                  {/* Option 3: Upload Backup (Restore Memory) */}
-                  <button
-                    type="button"
-                    onClick={handleTriggerUpload}
-                    className="flex items-center justify-between p-2.5 rounded-xl bg-blue-950/40 hover:bg-blue-900/60 border border-blue-500/30 text-blue-200 transition-all text-left"
-                  >
-                    <div className="flex items-center gap-2">
-                      <Upload className="w-4 h-4 text-blue-400" />
-                      <div className="flex flex-col">
-                        <span className="font-semibold text-xs text-blue-100">Upload Backup</span>
-                        <span className="text-[9px] text-blue-300/60 font-sans">Restore vault from device/drive</span>
-                      </div>
-                    </div>
-                    <span className="text-[9px] px-2 py-0.5 rounded bg-blue-900/80 text-blue-200 font-bold uppercase tracking-wider">
-                      RESTORE
-                    </span>
-                  </button>
-
-                  <div className="h-[1px] bg-purple-500/20 my-0.5" />
-
-                  {/* Option 4: Microphone Input Toggle */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      toggleHumanMic();
-                    }}
-                    className={`flex items-center justify-between p-2.5 rounded-xl border transition-all text-left ${
-                      isMicActive
-                        ? 'bg-purple-900/60 border-purple-400 text-white shadow-[0_0_15px_rgba(168,85,247,0.3)]'
-                        : 'bg-zinc-900/60 border-purple-500/20 text-purple-200 hover:bg-purple-950/40'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      {isMicActive ? (
-                        <Mic className="w-4 h-4 text-purple-300 animate-pulse" />
-                      ) : (
-                        <MicOff className="w-4 h-4 text-zinc-500" />
-                      )}
-                      <div className="flex flex-col">
-                        <span className="font-semibold text-xs">Mic Input</span>
-                        <span className="text-[9px] text-purple-300/60 font-sans">Voice speech recognition</span>
-                      </div>
-                    </div>
-                    <span
-                      className={`text-[9px] px-2 py-0.5 rounded font-bold uppercase tracking-wider ${
-                        isMicActive ? 'bg-purple-600 text-white' : 'bg-zinc-800 text-zinc-400'
-                      }`}
-                    >
-                      {isMicActive ? 'ACTIVE' : 'OFF'}
-                    </span>
-                  </button>
-
-                  {/* Option 5: Voice Speaker Output Toggle */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      toggleVoiceOutput();
-                    }}
-                    className={`flex items-center justify-between p-2.5 rounded-xl border transition-all text-left ${
-                      isPossibilitiesVoiceOn
-                        ? 'bg-purple-900/60 border-purple-400 text-white'
-                        : 'bg-zinc-900/60 border-purple-500/20 text-zinc-400 hover:bg-purple-950/40'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      {isPossibilitiesVoiceOn ? (
-                        <Volume2 className="w-4 h-4 text-purple-300" />
-                      ) : (
-                        <VolumeX className="w-4 h-4 text-zinc-500" />
-                      )}
-                      <div className="flex flex-col">
-                        <span className="font-semibold text-xs">Speaker Output</span>
-                        <span className="text-[9px] text-purple-300/60 font-sans">Speech synthesis audio</span>
-                      </div>
-                    </div>
-                    <span
-                      className={`text-[9px] px-2 py-0.5 rounded font-bold uppercase tracking-wider ${
-                        isPossibilitiesVoiceOn ? 'bg-purple-600 text-white' : 'bg-zinc-800 text-zinc-400'
-                      }`}
-                    >
-                      {isPossibilitiesVoiceOn ? 'ON' : 'MUTED'}
-                    </span>
-                  </button>
-
-                  {/* Option 6: Clear Chat Stream */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleClearChatHistory();
-                      setIsOptionsMenuOpen(false);
-                    }}
-                    className="flex items-center justify-between p-2.5 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 border border-rose-500/30 text-rose-300 transition-all text-left"
-                  >
-                    <div className="flex items-center gap-2">
-                      <Trash2 className="w-4 h-4 text-rose-400" />
-                      <div className="flex flex-col">
-                        <span className="font-semibold text-xs text-rose-200">Clear Chat</span>
-                        <span className="text-[9px] text-rose-300/60 font-sans">Reset visible transcript</span>
-                      </div>
-                    </div>
-                    <span className="text-[9px] px-2 py-0.5 rounded bg-rose-900/80 text-rose-100 font-bold uppercase tracking-wider">
-                      CLEAR
-                    </span>
-                  </button>
-                </motion.div>
-              </>
-            )}
-          </AnimatePresence>
         </div>
-      </div>
-    </motion.div>
+      </motion.div>
 
       {/* Offline Mode Banner */}
       {!isApiOnline && (

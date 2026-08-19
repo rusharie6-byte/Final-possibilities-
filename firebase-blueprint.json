@@ -1,0 +1,26 @@
+{
+  "entities": {
+    "MemoryVaultBackup": {
+      "title": "Memory Vault Backup",
+      "description": "Zero-knowledge encrypted cloud memory vault backup preserving user context across reinstalls.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Owner Google User ID", "maxLength": 128 },
+        "userEmail": { "type": "string", "description": "User Email", "maxLength": 256 },
+        "vaultId": { "type": "string", "description": "Unique Vault Identifier", "maxLength": 128 },
+        "version": { "type": "string", "description": "Vault schema version", "maxLength": 32 },
+        "updatedAt": { "type": "string", "description": "ISO timestamp of last cloud sync", "maxLength": 64 },
+        "coreMemoriesCount": { "type": "number", "description": "Number of core memory items preserved" },
+        "livingStateSummary": { "type": "string", "description": "High level living state summary", "maxLength": 500 },
+        "vaultPayloadJson": { "type": "string", "description": "Full serialized memory vault state and capsules", "maxLength": 1000000 }
+      },
+      "required": ["userId", "userEmail", "vaultId", "version", "updatedAt", "vaultPayloadJson"]
+    }
+  },
+  "firestore": {
+    "/user_vaults/{userId}": {
+      "schema": "MemoryVaultBackup",
+      "description": "Stores user's sovereign encrypted memory vault for seamless auto-restore across reinstalls and device changes."
+    }
+  }
+}

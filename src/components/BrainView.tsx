@@ -3,7 +3,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Sparkles, Cpu, Network, Zap, Send, RefreshCw, Layers } from 'lucide-react';
 import { BrainNode } from '../types';
 import { audioSynth } from '../utils/audioSynthesizer';
-import { getApiEndpoint, loggedFetch } from '../lib/api';
+import { getApiEndpoint, loggedFetch, getCustomGeminiApiKey } from '../lib/api';
+import { offline3BEngine } from '../utils/offline3BEngine';
 
 const INITIAL_NODES: BrainNode[] = [
   { id: '1', label: 'Core Self-Model', category: 'core', valency: 0.95, x: 0, y: 0, connections: ['2', '3', '4', '5'], isActive: true },
@@ -42,22 +43,32 @@ export const BrainView: React.FC = () => {
     if (e) e.preventDefault();
     if (!synthesisQuery.trim()) return;
 
+    const query = synthesisQuery.trim();
     setIsSynthesizing(true);
     audioSynth.playOrbPulse(300, 0.4);
 
     try {
-      const apiUrl = getApiEndpoint('/api/gemini');
-      const res = await loggedFetch(apiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: `Analyze and synthesize this concept through the Possibilities Neural Engine: "${synthesisQuery}". Provide a concise, high-level cognitive breakdown with 3 core pillars.`,
-          systemInstruction: 'You are the Possibilities Neural Engine. Respond concisely, intelligently, and elegantly in a calm tone.'
-        }),
-      });
+      const customApiKey = getCustomGeminiApiKey();
+      if (!customApiKey) {
+        // Run 3B Local Engine
+        const localRes = await offline3BEngine.generateResponse(`Analyze and synthesize this concept: "${query}". Provide a concise cognitive breakdown.`);
+        setSynthesisOutput(localRes.text);
+      } else {
+        const apiUrl = getApiEndpoint('/api/gemini');
+        const res = await loggedFetch(apiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: `Analyze and synthesize this concept through the Possibilities Neural Engine: "${query}". Provide a concise, high-level cognitive breakdown with 3 core pillars.`,
+            systemInstruction: 'You are the Possibilities Neural Engine. Respond concisely, intelligently, and elegantly in a calm tone.',
+            customApiKey,
+          }),
+        });
 
-      const data = await res.json();
-      setSynthesisOutput(data.text || 'Synthesis complete.');
+        const data = await res.json();
+        setSynthesisOutput(data.text || 'Synthesis complete.');
+      }
+
       // Activate random nodes during synthesis
       setNodes((prev) =>
         prev.map((n) => ({
@@ -66,7 +77,7 @@ export const BrainView: React.FC = () => {
         }))
       );
     } catch (err) {
-      setSynthesisOutput('Neural connection pulse completed offline. Concept integrated into local memory layer.');
+      setSynthesisOutput('Neural connection pulse completed offline. Concept integrated into local 3B memory layer.');
     } finally {
       setIsSynthesizing(false);
       setSynthesisQuery('');

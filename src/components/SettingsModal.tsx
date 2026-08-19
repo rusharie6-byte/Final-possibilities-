@@ -1,17 +1,23 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Sliders, X, ShieldCheck, Database, Cpu, Gauge, Key, HardDrive, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Sliders, X, ShieldCheck, Database, Cpu, Gauge, Key, HardDrive, CheckCircle2, AlertCircle, FileCheck, Brain, Download, Upload, Mic, MicOff, Volume2, VolumeX, Trash2, Cloud } from 'lucide-react';
 import { audioSynth } from '../utils/audioSynthesizer';
 import { perfManager, PerformanceSetting } from '../utils/performance';
 import { getCustomGeminiApiKey, setCustomGeminiApiKey, getCustomBackendUrl, setCustomBackendUrl, getApiEndpoint, loggedFetch } from '../lib/api';
+import { storageEngine } from '../utils/storageEngine';
+import { masterBundleEngine } from '../utils/masterBundleEngine';
+import { companionEngine } from '../utils/companionEngine';
+import { memoryStore } from '../utils/memoryStore';
 import { AppLifecycleBackupModal } from './AppLifecycleBackupModal';
+import { CloudVaultManagerModal } from './CloudVaultManagerModal';
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onOpenPanel?: (panelId: string) => void;
 }
 
-export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
+export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onOpenPanel }) => {
   const [perfSetting, setPerfSetting] = useState<PerformanceSetting>(perfManager.getSetting());
   const [effectiveMode, setEffectiveMode] = useState<'high' | 'low'>(perfManager.getEffectiveMode());
   const [fps, setFps] = useState<number>(perfManager.getFps());
@@ -22,15 +28,72 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [keyTestStatus, setKeyTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const [keyMessage, setKeyMessage] = useState<string>('');
 
-  // Backup Modal State
+  // Backup Modal State & Status Notice
   const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
+  const [isCloudModalOpen, setIsCloudModalOpen] = useState(false);
+  const [statusNotice, setStatusNotice] = useState<string | null>(null);
+
+  // Audio / Mic settings
+  const [isVoiceOn, setIsVoiceOn] = useState<boolean>(true);
+  const [isMicOn, setIsMicOn] = useState<boolean>(false);
+
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (isOpen) {
       setBackendUrlInput(getCustomBackendUrl());
       setApiKeyInput(getCustomGeminiApiKey());
+      setStatusNotice(null);
     }
   }, [isOpen]);
+
+  const handleTriggerUpload = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+      fileInputRef.current.click();
+    }
+  };
+
+  const handleSelfBackup = () => {
+    audioSynth.playOrbPulse(700, 0.25);
+    const dateStr = new Date().toISOString().split('T')[0];
+    const success = storageEngine.exportVaultFileDownload(`possibilities_vault_backup_${dateStr}.vault`);
+    if (success) {
+      setStatusNotice('Vault backup (.vault) exported and downloaded successfully!');
+    } else {
+      setStatusNotice('Failed to generate vault backup export.');
+    }
+  };
+
+  const handleFileRestore = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const payload = await storageEngine.importVaultPayloadText(text);
+      if (payload) {
+        await memoryStore.initAsync();
+        audioSynth.playEnergyBloom();
+        setStatusNotice('Vault restored successfully from ' + file.name);
+      } else {
+        setStatusNotice('Restore error: Invalid vault file structure or checksum mismatch.');
+      }
+    } catch (err: any) {
+      setStatusNotice('Failed to parse vault file: ' + (err?.message || 'Invalid format'));
+    }
+  };
+
+  const handleClearHistory = () => {
+    if (window.confirm('Clear current session chat history? Your long-term Memory Vault is preserved.')) {
+      audioSynth.playNodeClick(300);
+      try {
+        localStorage.removeItem('possibilities_active_chat_v1');
+        localStorage.removeItem('possibilities_chat_history');
+      } catch {}
+      setStatusNotice('Chat history cleared.');
+    }
+  };
 
   useEffect(() => {
     const unsubscribe = perfManager.subscribe(() => {
@@ -98,9 +161,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         throw new Error('Server returned HTML instead of JSON. Leave "Cloud Run / Remote Backend URL" blank when testing in browser preview.');
       }
 
-      if (res.ok || data.status === 'ok' || data.geminiConnection === 'success' || data.geminiKeyPresent) {
+      if (data.geminiConnection === 'error') {
+        const errDetail = data.error || 'Gemini API call failed';
+        setKeyTestStatus('error');
+        if (errDetail.includes('429') || errDetail.includes('spending cap') || errDetail.includes('RESOURCE_EXHAUSTED')) {
+          setKeyMessage(`Gemini Quota/Cap Notice: ${errDetail}. (If you just updated your cap, Google AI Studio may take a short time to propagate, or you can paste a fresh key).`);
+        } else {
+          setKeyMessage(`Gemini Error: ${errDetail}`);
+        }
+      } else if (res.ok || data.status === 'ok' || data.geminiConnection === 'success') {
         setKeyTestStatus('success');
-        setKeyMessage(cleanKey ? 'Custom Gemini API Key & Backend verified! AI features active.' : 'Backend connection verified active & ONLINE!');
+        setKeyMessage(cleanKey ? 'Custom Gemini API Key & Backend verified! AI live test succeeded.' : 'Built-in Gemini API connection verified live & active!');
         audioSynth.playNodeClick(1000);
       } else {
         setKeyTestStatus('error');
@@ -140,6 +211,131 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
             {/* Configuration List */}
             <div className="flex flex-col gap-4 text-xs font-mono">
+              {/* Status Notice if present */}
+              {statusNotice && (
+                <div className="p-3 rounded-2xl bg-purple-900/60 border border-purple-400 text-purple-100 flex items-center justify-between text-xs shadow-[0_0_15px_rgba(168,85,247,0.3)]">
+                  <span>{statusNotice}</span>
+                  <button onClick={() => setStatusNotice(null)} className="text-purple-300 hover:text-white text-xs font-bold">DISMISS</button>
+                </div>
+              )}
+
+              {/* Master 1-Click Complete System Export */}
+              <div className="p-4 rounded-2xl bg-gradient-to-r from-purple-950/60 via-indigo-950/50 to-zinc-950/80 border border-purple-400/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-[0_0_20px_rgba(168,85,247,0.25)]">
+                <div className="flex items-center gap-3">
+                  <FileCheck className="w-5 h-5 text-purple-300 shrink-0" />
+                  <div>
+                    <div className="font-bold text-white text-sm">Save Entire App (1 File)</div>
+                    <div className="text-[10px] text-purple-300/80">Complete sovereign package: All 13 Laws, Memory Vault, & Architecture</div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      audioSynth.playOrbPulse(700, 0.25);
+                      masterBundleEngine.downloadSingleMasterFile('markdown');
+                      setStatusNotice('Master Blueprint (.md) downloaded! Complete 1-file package ready.');
+                    }}
+                    className="flex-1 sm:flex-initial px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs uppercase transition-all shadow-[0_0_12px_#A855F7] flex items-center justify-center gap-1.5"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>SAVE .MD</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      audioSynth.playOrbPulse(800, 0.25);
+                      masterBundleEngine.downloadSingleMasterFile('json');
+                      setStatusNotice('Master Blueprint (.json) downloaded! Machine-readable package ready.');
+                    }}
+                    className="flex-1 sm:flex-initial px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs uppercase transition-all shadow-[0_0_12px_#6366F1] flex items-center justify-center gap-1.5"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>SAVE .JSON</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Memory Vault & Backup Controls */}
+              <div className="p-4 rounded-2xl bg-purple-950/20 border border-purple-500/30 flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <Brain className="w-5 h-5 text-purple-400" />
+                    <div>
+                      <div className="font-bold text-white">Memory Vault & Backups</div>
+                      <div className="text-[10px] text-purple-300/60">Long-term memories: {companionEngine.getLongTermMemories().length} active</div>
+                    </div>
+                  </div>
+                  {onOpenPanel && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        audioSynth.playNodeClick(600);
+                        onClose();
+                        onOpenPanel('memory');
+                      }}
+                      className="px-3 py-1 rounded-xl bg-purple-900/60 hover:bg-purple-800 text-purple-200 border border-purple-500/40 text-[10px] uppercase font-bold transition-all"
+                    >
+                      VIEW VAULT
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={handleSelfBackup}
+                    className="flex items-center justify-between p-2.5 rounded-xl bg-emerald-950/40 hover:bg-emerald-900/60 border border-emerald-500/30 text-emerald-200 transition-all text-left"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Download className="w-4 h-4 text-emerald-400" />
+                      <div className="flex flex-col">
+                        <span className="font-semibold text-xs text-emerald-100">Self Backup</span>
+                        <span className="text-[9px] text-emerald-300/60 font-sans">Export encrypted .vault</span>
+                      </div>
+                    </div>
+                    <span className="text-[9px] px-2 py-0.5 rounded bg-emerald-900/80 text-emerald-200 font-bold uppercase">
+                      SAVE
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleTriggerUpload}
+                    className="flex items-center justify-between p-2.5 rounded-xl bg-blue-950/40 hover:bg-blue-900/60 border border-blue-500/30 text-blue-200 transition-all text-left"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Upload className="w-4 h-4 text-blue-400" />
+                      <div className="flex flex-col">
+                        <span className="font-semibold text-xs text-blue-100">Upload Backup</span>
+                        <span className="text-[9px] text-blue-300/60 font-sans">Restore from device</span>
+                      </div>
+                    </div>
+                    <span className="text-[9px] px-2 py-0.5 rounded bg-blue-900/80 text-blue-200 font-bold uppercase">
+                      RESTORE
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Chat Session & Transcript Reset */}
+              <div className="p-4 rounded-2xl bg-purple-950/20 border border-purple-500/30 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Trash2 className="w-5 h-5 text-rose-400" />
+                  <div>
+                    <div className="font-bold text-white">Clear Chat Transcript</div>
+                    <div className="text-[10px] text-purple-300/60">Reset screen stream while preserving permanent memories</div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleClearHistory}
+                  className="px-3.5 py-1.5 rounded-xl bg-rose-950/60 hover:bg-rose-900/80 border border-rose-500/40 text-rose-300 text-[10px] uppercase font-bold transition-all shadow-[0_0_10px_rgba(244,63,94,0.2)]"
+                >
+                  CLEAR CHAT
+                </button>
+              </div>
+
               {/* Performance Mode Selector */}
               <div className="p-4 rounded-2xl bg-purple-950/20 border border-purple-500/30 flex flex-col gap-2.5">
                 <div className="flex items-center justify-between">
@@ -179,29 +375,29 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 </div>
               </div>
 
-              {/* Gemini API Key & Backend Service URL Section */}
+              {/* Possibilities 3B Offline Engine & Optional Online API Key Section */}
               <div className="p-4 rounded-2xl bg-purple-950/20 border border-purple-500/30 flex flex-col gap-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <Key className="w-5 h-5 text-purple-400" />
                     <div>
-                      <div className="font-bold text-white">APK Remote Backend & Gemini Key</div>
-                      <div className="text-[10px] text-purple-300/60">Target Cloud Run URL & Custom Gemini API Key for Android APK</div>
+                      <div className="font-bold text-white">Engine Priority & Optional API Key</div>
+                      <div className="text-[10px] text-purple-300/60">Possibilities 3B Local Core is active first | Online API is optional second choice</div>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    {(backendUrlInput.trim() || apiKeyInput.trim()) && (
+                    {apiKeyInput.trim() && (
                       <button
                         type="button"
                         onClick={handleResetToDefault}
                         className="text-[9px] px-2 py-0.5 rounded bg-rose-950/80 hover:bg-rose-900 text-rose-300 border border-rose-500/40 font-bold uppercase transition-all shadow-[0_0_10px_rgba(244,63,94,0.3)]"
-                        title="Clear custom backend URL & key and reconnect"
+                        title="Clear API key and return to 100% 3B Local Engine"
                       >
-                        RESET DEFAULT
+                        REMOVE KEY
                       </button>
                     )}
-                    <span className={`text-[10px] px-2.5 py-1 rounded-full uppercase font-bold ${apiKeyInput.trim() || backendUrlInput.trim() ? 'bg-purple-900/60 text-purple-200 border border-purple-500/40' : 'bg-emerald-950/80 text-emerald-300 border border-emerald-500/40'}`}>
-                      {backendUrlInput.trim() ? 'CUSTOM BACKEND' : 'BUILT-IN HOST'}
+                    <span className={`text-[10px] px-2.5 py-1 rounded-full uppercase font-bold ${apiKeyInput.trim() ? 'bg-indigo-900/60 text-indigo-200 border border-indigo-500/40' : 'bg-emerald-950/80 text-emerald-300 border border-emerald-500/40'}`}>
+                      {apiKeyInput.trim() ? 'TEMPORARY ONLINE KEY' : '3B LOCAL CORE (ACTIVE)'}
                     </span>
                   </div>
                 </div>
@@ -209,7 +405,46 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 <div className="flex flex-col gap-2.5">
                   <div className="flex flex-col gap-1">
                     <div className="flex items-center justify-between">
-                      <label className="text-[10px] text-purple-300/80 uppercase font-bold">Cloud Run / Remote Backend URL (APK mode):</label>
+                      <label className="text-[10px] text-purple-300/80 uppercase font-bold">Temporary Gemini API Key (Optional Second Choice):</label>
+                      {apiKeyInput && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setApiKeyInput('');
+                            setCustomGeminiApiKey('');
+                            setStatusNotice('Custom API key removed. 3B Local Engine active.');
+                          }}
+                          className="text-[9px] text-purple-400 hover:text-white underline"
+                        >
+                          Clear Key
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <input
+                        type="password"
+                        value={apiKeyInput}
+                        onChange={(e) => setApiKeyInput(e.target.value)}
+                        placeholder="Leave blank for 3B Local Engine, or paste temporary AIZaSy..."
+                        className="flex-1 bg-black border border-purple-500/30 rounded-xl px-3 py-2 text-xs text-white placeholder-purple-400/40 focus:outline-none focus:border-purple-400 font-sans"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleSaveAndTestKey}
+                        disabled={keyTestStatus === 'testing'}
+                        className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-bold text-xs uppercase transition-all shadow-[0_0_12px_#A855F7]"
+                      >
+                        {keyTestStatus === 'testing' ? 'TESTING...' : 'SAVE & TEST'}
+                      </button>
+                    </div>
+                    <span className="text-[10px] text-purple-300/70 leading-normal">
+                      🛡️ <strong>Default Behavior</strong>: The <strong>Possibilities 3B Local Engine</strong> runs active first with zero tokens and zero external API dependencies. Online mode is temporarily activated <em>only</em> if you explicitly enter an API key here.
+                    </span>
+                  </div>
+
+                  <div className="flex flex-col gap-1 pt-1">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] text-purple-300/80 uppercase font-bold">Cloud Run / Remote Backend URL (APK mode only):</label>
                       {backendUrlInput && (
                         <button
                           type="button"
@@ -230,33 +465,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                       placeholder="Leave blank for web preview (e.g. https://your-app.run.app for APK)"
                       className="bg-black border border-purple-500/30 rounded-xl px-3 py-2 text-xs text-white placeholder-purple-400/40 focus:outline-none focus:border-purple-400 font-sans"
                     />
-                    <span className="text-[10px] text-purple-300/70 leading-normal">
-                      💡 <strong>Web Browser / Preview</strong>: Leave blank! The app connects directly to the built-in server. Only fill this in if you compiled the app as an Android APK.
-                    </span>
-                  </div>
-
-                  <div className="flex flex-col gap-1">
-                    <label className="text-[10px] text-purple-300/80 uppercase font-bold">Custom Gemini API Key:</label>
-                    <div className="flex gap-2">
-                      <input
-                        type="password"
-                        value={apiKeyInput}
-                        onChange={(e) => setApiKeyInput(e.target.value)}
-                        placeholder="Leave blank to use server key, or paste AIZaSy..."
-                        className="flex-1 bg-black border border-purple-500/30 rounded-xl px-3 py-2 text-xs text-white placeholder-purple-400/40 focus:outline-none focus:border-purple-400 font-sans"
-                      />
-                      <button
-                        type="button"
-                        onClick={handleSaveAndTestKey}
-                        disabled={keyTestStatus === 'testing'}
-                        className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-bold text-xs uppercase transition-all shadow-[0_0_12px_#A855F7]"
-                      >
-                        {keyTestStatus === 'testing' ? 'TESTING...' : 'SAVE & TEST'}
-                      </button>
-                    </div>
-                    <span className="text-[10px] text-purple-300/70 leading-normal">
-                      💡 <strong>Gemini Key</strong>: Optional. Leave blank to use the app's server-side key automatically, or enter your personal Gemini key from Google AI Studio.
-                    </span>
                   </div>
                 </div>
 
@@ -266,6 +474,29 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                     <span>{keyMessage}</span>
                   </div>
                 )}
+              </div>
+
+              {/* Cloud Memory Vault & Zero Data Loss Sync Card */}
+              <div className="p-4 rounded-2xl bg-gradient-to-r from-purple-950/40 via-indigo-950/40 to-purple-950/40 border border-purple-500/40 flex items-center justify-between shadow-[0_0_20px_rgba(168,85,247,0.15)]">
+                <div className="flex items-center gap-3">
+                  <Cloud className="w-5 h-5 text-purple-400" />
+                  <div>
+                    <div className="font-bold text-white flex items-center gap-2">
+                      <span>Cloud Memory Vault & Zero-Loss Sync</span>
+                      <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-500/40 font-mono uppercase">Firestore Active</span>
+                    </div>
+                    <div className="text-[10px] text-purple-300/70">Continuous auto-backup & cross-reinstall memory restoration</div>
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    audioSynth.playOrbPulse(700, 0.2);
+                    setIsCloudModalOpen(true);
+                  }}
+                  className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-[10px] uppercase font-bold transition-all shadow-[0_0_12px_rgba(168,85,247,0.4)]"
+                >
+                  MANAGE CLOUD
+                </button>
               </div>
 
               {/* App Lifecycle & Vault Recovery Button */}
@@ -353,6 +584,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       <AppLifecycleBackupModal
         isOpen={isBackupModalOpen}
         onClose={() => setIsBackupModalOpen(false)}
+      />
+
+      <CloudVaultManagerModal
+        isOpen={isCloudModalOpen}
+        onClose={() => setIsCloudModalOpen(false)}
+      />
+
+      {/* Hidden File Input for Vault Upload */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".vault,.json"
+        className="hidden"
+        onChange={handleFileRestore}
       />
     </>
   );

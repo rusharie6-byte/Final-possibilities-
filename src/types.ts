@@ -180,3 +180,34 @@ export interface SystemDiagnostics {
   soundEnabled: boolean;
   activeMode: SystemMode;
 }
+
+export interface MasterBundleManifest {
+  manifestVersion: string;
+  generatedAt: string;
+  creator: {
+    actualName: string;
+    preferredAddress: string;
+    sovereignAuthority: boolean;
+  };
+  constitution: {
+    totalLaws: number;
+    sha256Checksum: string;
+    rawText: string;
+  };
+  liveMemoryVault: {
+    livingContext: LivingContext;
+    partnerProfile: PartnerProfile;
+    coreMemories: CoreMemoryItem[];
+    episodicCount: number;
+  };
+  architectureMap: {
+    runtime: string;
+    frontend: string;
+    backend: string;
+    governanceModel: string;
+    approvalPipeline?: string;
+    offlineEngineStatus: string;
+    internetGatewayPolicy: string;
+  };
+  quickReplicationPrompt: string;
+}

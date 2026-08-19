@@ -4,6 +4,7 @@ import { Download, Upload, ShieldAlert, CheckCircle2, X, RefreshCw, HardDrive, K
 import { storageEngine } from '../utils/storageEngine';
 import { memoryStore } from '../utils/memoryStore';
 import { audioSynth } from '../utils/audioSynthesizer';
+import { masterBundleEngine } from '../utils/masterBundleEngine';
 
 interface AppLifecycleBackupModalProps {
   isOpen: boolean;
@@ -233,7 +234,47 @@ export const AppLifecycleBackupModal: React.FC<AppLifecycleBackupModalProps> = (
             </div>
           </div>
 
-          {/* Section 2: Backup Export & Restore File Selector */}
+          {/* Section 2: Single Master Bundle & Universal Export */}
+          <div className="p-4 rounded-2xl bg-gradient-to-r from-purple-950/40 via-indigo-950/30 to-purple-950/40 border border-purple-500/50 flex flex-col gap-3 font-mono">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 font-bold text-white text-xs uppercase">
+                <FileCheck className="w-4 h-4 text-purple-400" />
+                <span>UNIVERSAL MASTER BLUEPRINT (ALL-IN-1 FILE)</span>
+              </div>
+              <span className="text-[10px] text-purple-300 bg-purple-900/60 px-2 py-0.5 rounded-full border border-purple-500/40 font-bold">
+                ChatGPT / Claude / Meta AI Ready
+              </span>
+            </div>
+            <p className="text-[11px] text-purple-200/80 leading-relaxed">
+              Export everything in **one compact file** (<code className="text-white font-bold bg-purple-900/60 px-1 py-0.5 rounded">.md</code> or <code className="text-white font-bold bg-purple-900/60 px-1 py-0.5 rounded">.json</code>) containing all 13 Laws, Constitution, entire Memory Vault, and Code Architecture. Any AI or person can open and read the entire system instantly.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+              <button
+                onClick={() => {
+                  audioSynth.playOrbPulse(700, 0.2);
+                  const ok = masterBundleEngine.downloadSingleMasterFile('markdown');
+                  if (ok) setImportStatus('Master Blueprint (.md) downloaded! Contains everything in 1 file.');
+                }}
+                className="py-2.5 px-3 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-[0_0_15px_rgba(168,85,247,0.4)]"
+              >
+                <Download className="w-4 h-4" />
+                <span>DOWNLOAD MASTER .MD (READABLE)</span>
+              </button>
+              <button
+                onClick={() => {
+                  audioSynth.playOrbPulse(600, 0.2);
+                  const ok = masterBundleEngine.downloadSingleMasterFile('json');
+                  if (ok) setImportStatus('Master Bundle (.json) downloaded! Machine-readable by all APIs.');
+                }}
+                className="py-2.5 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-[0_0_15px_rgba(99,102,241,0.4)]"
+              >
+                <Download className="w-4 h-4" />
+                <span>DOWNLOAD MASTER .JSON (ALL-IN-1)</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Section 3: Backup Export & Restore File Selector */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Export Download */}
             <div className="p-4 rounded-2xl bg-purple-950/20 border border-purple-500/30 flex flex-col justify-between gap-3 font-mono">

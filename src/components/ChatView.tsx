@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { MessageSquareCode, Send, Volume2, VolumeX, Sparkles, Bot, User, RefreshCw, Mic, MicOff, Copy, Check, ShieldCheck, CheckCircle2, XCircle, Sliders, Trash2, X, WifiOff, Image as ImageIcon, Wand2, Video, Code2, Layers, Search, Brain, Palette, Film, Music, FileText, Gamepad2, Package, Paperclip, Settings, FileUp, Download, Upload } from 'lucide-react';
+import { MessageSquareCode, Send, Volume2, VolumeX, Sparkles, Bot, User, RefreshCw, Mic, MicOff, Copy, Check, ShieldCheck, CheckCircle2, XCircle, Sliders, Trash2, X, WifiOff, Image as ImageIcon, Wand2, Video, Code2, Layers, Search, Brain, Palette, Film, Music, FileText, Gamepad2, Package, Paperclip, Settings, FileUp, Download, Upload, FileCheck } from 'lucide-react';
 import { ChatMessage, MediaAttachment } from '../types';
 import { audioSynth } from '../utils/audioSynthesizer';
 import { companionEngine } from '../utils/companionEngine';
@@ -8,6 +8,9 @@ import { memoryStore } from '../utils/memoryStore';
 import { temporalEngine } from '../utils/temporalEngine';
 import { approvalGate } from '../utils/approvalBridge';
 import { storageEngine } from '../utils/storageEngine';
+import { sovereignScavenger } from '../utils/sovereignScavenger';
+import { masterBundleEngine } from '../utils/masterBundleEngine';
+import { offline3BEngine } from '../utils/offline3BEngine';
 import { getApiEndpoint, loggedFetch, getCustomGeminiApiKey } from '../lib/api';
 import { AiCreationStudioModal, StudioTabType } from './AiCreationStudioModal';
 import { MediaAttachmentCard } from './MediaAttachmentCard';
@@ -296,128 +299,148 @@ export const ChatView: React.FC = () => {
         promptContext;
 
       const customApiKey = getCustomGeminiApiKey();
-      const apiUrl = getApiEndpoint('/api/gemini');
-      const res = await loggedFetch(apiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: finalPromptText,
-          systemInstruction: systemInstructionText,
-          customApiKey: customApiKey || undefined,
-          history: messages.map((m) => ({
+      let replyText = '';
+      let extractedCall: { name: string; args: any } | null = null;
+      let stagedActionPayload: any = undefined;
+
+      // IF NO CUSTOM API KEY IS ENTERED: Run the 100% Offline 3B Cognitive Core Engine as First Priority
+      if (!customApiKey) {
+        setOfflineNotice('Possibilities 3B Local Engine Active (Zero Tokens Consumed) | 100% Offline');
+        const local3BRes = await offline3BEngine.generateResponse(
+          finalPromptText,
+          messages.map((m) => ({
             role: m.sender === 'user' ? 'user' : 'model',
             text: m.text,
           })),
-          attachments: activeAttachments.map((a) => ({
-            name: a.name,
-            mimeType: a.mimeType,
-            base64Data: a.base64Data,
-            textPayload: a.textPayload,
-          })),
-        }),
-      });
+          systemInstructionText
+        );
+        replyText = local3BRes.text;
+      } else {
+        // OPTIONAL ONLINE SECOND CHOICE: Runs only when user enters a custom API key in Settings
+        setOfflineNotice('Online Gemini Mode Active (Using Temporary User Key)');
+        const apiUrl = getApiEndpoint('/api/gemini');
+        const res = await loggedFetch(apiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: finalPromptText,
+            systemInstruction: systemInstructionText,
+            customApiKey: customApiKey,
+            history: messages.map((m) => ({
+              role: m.sender === 'user' ? 'user' : 'model',
+              text: m.text,
+            })),
+            attachments: activeAttachments.map((a) => ({
+              name: a.name,
+              mimeType: a.mimeType,
+              base64Data: a.base64Data,
+              textPayload: a.textPayload,
+            })),
+          }),
+        });
 
-      const data = await res.json();
-      let replyText = '';
-      let stagedActionPayload: any = undefined;
+        const data = await res.json();
 
-      // Extract function call either from native data.functionCalls or from stringified data.text
-      let extractedCall: { name: string; args: any } | null = null;
-      if (data.functionCalls && Array.isArray(data.functionCalls) && data.functionCalls.length > 0) {
-        extractedCall = data.functionCalls[0];
-      } else if (data.text && typeof data.text === 'string') {
-        const trimmed = data.text.trim();
-        if (trimmed.startsWith('{"functionCall":') || trimmed.startsWith('{"functionCalls":')) {
-          try {
-            const parsed = JSON.parse(trimmed);
-            if (parsed.functionCall) {
-              extractedCall = parsed.functionCall;
-            } else if (parsed.functionCalls && Array.isArray(parsed.functionCalls) && parsed.functionCalls.length > 0) {
-              extractedCall = parsed.functionCalls[0];
-            }
-          } catch {}
-        }
-      }
-
-      if (data.fallback || data.error) {
-        const errStr = typeof data.error === 'object' ? JSON.stringify(data.error) : String(data.error || '');
-        if (errStr.includes('429') || errStr.includes('spending cap') || errStr.includes('RESOURCE_EXHAUSTED') || errStr.includes('quota')) {
-          setOfflineNotice('Gemini API monthly spend cap ($2.00 limit) reached on AI Studio. Increase cap at aistudio.google.com/spend or update API key in Settings.');
-        } else {
-          setOfflineNotice('Cloud AI temporarily offline. Operating via Local Companion Engine.');
-        }
-        replyText = companionEngine.getOfflineFallback(finalPromptText);
-      } else if (extractedCall) {
-        const fc = extractedCall;
-
-        // A. READ-ONLY TOOLS (Auto-execute via /api/tools/read and feed output back to Gemini)
-        if (fc.name === 'list_directory' || fc.name === 'read_file') {
-          try {
-            const readRes = await loggedFetch(getApiEndpoint('/api/tools/read'), {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ toolName: fc.name, args: fc.args || {} }),
-            });
-            const readData = await readRes.json();
-
-            if (readData.success) {
-              const formattedContent = typeof readData.data === 'object' ? JSON.stringify(readData.data, null, 2) : String(readData.data);
-              
-              // Secondary request to Gemini to synthesize natural response from tool output
-              try {
-                const secondPrompt = `[SYSTEM TOOL RESULT for ${fc.name}]:\n${formattedContent}\n\n[USER ORIGINAL REQUEST]:\n${finalPromptText}\n\nPlease analyze the tool output and provide a clear, helpful response to the user.`;
-                const followUpRes = await loggedFetch(getApiEndpoint('/api/gemini'), {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    prompt: secondPrompt,
-                    systemInstruction: systemInstructionText,
-                    customApiKey: customApiKey || undefined,
-                  }),
-                });
-                const followUpData = await followUpRes.json();
-                if (followUpData.text) {
-                  const trimmedFollowUp = followUpData.text.trim();
-                  if (!trimmedFollowUp.startsWith('{"functionCall":') && !trimmedFollowUp.startsWith('{"functionCalls":')) {
-                    replyText = followUpData.text;
-                  }
-                }
-              } catch {
-                replyText = `Read Tool Output (${fc.name}):\n\`\`\`\n${formattedContent}\n\`\`\``;
+        // Extract function call either from native data.functionCalls or from stringified data.text
+        if (data.functionCalls && Array.isArray(data.functionCalls) && data.functionCalls.length > 0) {
+          extractedCall = data.functionCalls[0];
+        } else if (data.text && typeof data.text === 'string') {
+          const trimmed = data.text.trim();
+          if (trimmed.startsWith('{"functionCall":') || trimmed.startsWith('{"functionCalls":')) {
+            try {
+              const parsed = JSON.parse(trimmed);
+              if (parsed.functionCall) {
+                extractedCall = parsed.functionCall;
+              } else if (parsed.functionCalls && Array.isArray(parsed.functionCalls) && parsed.functionCalls.length > 0) {
+                extractedCall = parsed.functionCalls[0];
               }
-            } else {
-              replyText = `Read Tool Error (${fc.name}): ${readData.error || 'Failed to read'}`;
-            }
-          } catch (readErr: any) {
-            replyText = `Read Tool Execution Error: ${readErr.message}`;
+            } catch {}
           }
-        } 
-        // B. MUTATIVE / WRITE TOOLS (Trigger Approval Gate Modal)
-        else if (fc.name === 'propose_file_change' || fc.name === 'propose_terminal_command' || fc.name === 'propose_file_write') {
-          setActiveProposal({
-            toolName: fc.name,
-            args: {
-              filePath: fc.args?.filePath || fc.args?.file_path,
-              command: fc.args?.command,
-              content: fc.args?.content,
-              reason: fc.args?.reason || fc.args?.reasoning || 'Proposed by AI system',
-            },
-          });
-          setIsSending(false);
-          return; // STOP EXECUTION HERE - Approval Gate modal handles output
-        } else {
-          setActiveProposal({
-            toolName: fc.name,
-            args: fc.args || {},
-          });
-          setIsSending(false);
-          return; // STOP EXECUTION HERE - Approval Gate modal handles output
         }
-      } else if (data.text) {
-        // Filter out raw JSON functionCall text string representations
-        const trimmed = data.text.trim();
-        if (!trimmed.startsWith('{"functionCall":') && !trimmed.startsWith('{"functionCalls":')) {
-          replyText = data.text;
+
+        if (data.fallback || data.error) {
+          setOfflineNotice('Possibilities 3B Local Engine Active (Zero Tokens Consumed) | Offline Fallback');
+          const local3BRes = await offline3BEngine.generateResponse(
+            finalPromptText,
+            messages.map((m) => ({
+              role: m.sender === 'user' ? 'user' : 'model',
+              text: m.text,
+            })),
+            systemInstructionText
+          );
+          replyText = local3BRes.text;
+        } else if (extractedCall) {
+          const fc = extractedCall;
+
+          // A. READ-ONLY TOOLS (Auto-execute via /api/tools/read and feed output back to Gemini)
+          if (fc.name === 'list_directory' || fc.name === 'read_file') {
+            try {
+              const readRes = await loggedFetch(getApiEndpoint('/api/tools/read'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ toolName: fc.name, args: fc.args || {} }),
+              });
+              const readData = await readRes.json();
+
+              if (readData.success) {
+                const formattedContent = typeof readData.data === 'object' ? JSON.stringify(readData.data, null, 2) : String(readData.data);
+                
+                // Secondary request to Gemini to synthesize natural response from tool output
+                try {
+                  const secondPrompt = `[SYSTEM TOOL RESULT for ${fc.name}]:\n${formattedContent}\n\n[USER ORIGINAL REQUEST]:\n${finalPromptText}\n\nPlease analyze the tool output and provide a clear, helpful response to the user.`;
+                  const followUpRes = await loggedFetch(getApiEndpoint('/api/gemini'), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      prompt: secondPrompt,
+                      systemInstruction: systemInstructionText,
+                      customApiKey: customApiKey || undefined,
+                    }),
+                  });
+                  const followUpData = await followUpRes.json();
+                  if (followUpData.text) {
+                    const trimmedFollowUp = followUpData.text.trim();
+                    if (!trimmedFollowUp.startsWith('{"functionCall":') && !trimmedFollowUp.startsWith('{"functionCalls":')) {
+                      replyText = followUpData.text;
+                    }
+                  }
+                } catch {
+                  replyText = `Read Tool Output (${fc.name}):\n\`\`\`\n${formattedContent}\n\`\`\``;
+                }
+              } else {
+                replyText = `Read Tool Error (${fc.name}): ${readData.error || 'Failed to read'}`;
+              }
+            } catch (readErr: any) {
+              replyText = `Read Tool Execution Error: ${readErr.message}`;
+            }
+          } 
+          // B. MUTATIVE / WRITE TOOLS (Trigger Approval Gate Modal)
+          else if (fc.name === 'propose_file_change' || fc.name === 'propose_terminal_command' || fc.name === 'propose_file_write') {
+            setActiveProposal({
+              toolName: fc.name,
+              args: {
+                filePath: fc.args?.filePath || fc.args?.file_path,
+                command: fc.args?.command,
+                content: fc.args?.content,
+                reason: fc.args?.reason || fc.args?.reasoning || 'Proposed by AI system',
+              },
+            });
+            setIsSending(false);
+            return; // STOP EXECUTION HERE - Approval Gate modal handles output
+          } else {
+            setActiveProposal({
+              toolName: fc.name,
+              args: fc.args || {},
+            });
+            setIsSending(false);
+            return; // STOP EXECUTION HERE - Approval Gate modal handles output
+          }
+        } else if (data.text) {
+          // Filter out raw JSON functionCall text string representations
+          const trimmed = data.text.trim();
+          if (!trimmed.startsWith('{"functionCall":') && !trimmed.startsWith('{"functionCalls":')) {
+            replyText = data.text;
+          }
         }
       }
 
@@ -497,228 +520,20 @@ export const ChatView: React.FC = () => {
           </div>
         </div>
 
-        {/* OPTIONS & SETTINGS BUTTONS */}
-        <div className="flex items-center gap-2 relative">
+        {/* SETTINGS BUTTON (OPTIONS MOVED TO SETTINGS) */}
+        <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => {
               audioSynth.playNodeClick(600);
               setIsSettingsOpen(true);
             }}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold tracking-wider bg-purple-950/80 text-purple-200 border border-purple-500/40 hover:bg-purple-900 transition-all shadow-md"
-            title="Open System Settings"
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold tracking-wider bg-purple-950/80 text-purple-200 border border-purple-500/40 hover:bg-purple-900 transition-all shadow-[0_0_15px_rgba(168,85,247,0.3)] cursor-pointer"
+            title="Open System Settings & Options"
           >
             <Settings className="w-3.5 h-3.5 text-purple-300" />
-            <span className="hidden sm:inline">SETTINGS</span>
+            <span>SETTINGS</span>
           </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              audioSynth.playNodeClick(500);
-              setIsOptionsMenuOpen((prev) => !prev);
-            }}
-            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold tracking-wider transition-all border ${
-              isOptionsMenuOpen || isListening || voiceEnabled
-                ? 'bg-purple-600 text-white border-purple-400 shadow-[0_0_12px_#A855F7]'
-                : 'bg-black/80 text-purple-300/80 border-purple-500/30 hover:text-purple-100 hover:border-purple-400'
-            }`}
-            title="Open Options Menu"
-          >
-            <Sliders className="w-3.5 h-3.5" />
-            <span>OPTIONS</span>
-            {(isListening || voiceEnabled) && (
-              <span className="w-2 h-2 rounded-full bg-purple-300 animate-pulse" />
-            )}
-          </button>
-
-          <AnimatePresence>
-            {isOptionsMenuOpen && (
-              <>
-                {/* Backdrop overlay */}
-                <div
-                  className="fixed inset-0 z-[90]"
-                  onClick={() => setIsOptionsMenuOpen(false)}
-                />
-
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.95, y: 8 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.95, y: 8 }}
-                  transition={{ duration: 0.15 }}
-                  className="absolute right-0 top-full mt-2 w-72 p-3.5 rounded-2xl bg-zinc-950/95 border border-purple-500/40 backdrop-blur-2xl shadow-[0_20px_60px_rgba(0,0,0,0.95)] z-[100] text-xs font-mono flex flex-col gap-2.5"
-                >
-                  <div className="flex items-center justify-between pb-2 border-b border-purple-500/20 text-purple-300 font-bold tracking-wider">
-                    <span className="flex items-center gap-1.5 text-[11px] uppercase">
-                      <Sliders className="w-3.5 h-3.5 text-purple-400" />
-                      Chat & System Options
-                    </span>
-                    <button
-                      onClick={() => setIsOptionsMenuOpen(false)}
-                      className="p-1 rounded-full hover:bg-purple-900/40 text-purple-400 hover:text-white transition-all"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-
-                  {/* System Settings */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      audioSynth.playNodeClick(600);
-                      setIsSettingsOpen(true);
-                      setIsOptionsMenuOpen(false);
-                    }}
-                    className="flex items-center justify-between p-2.5 rounded-xl bg-purple-900/40 hover:bg-purple-800/60 border border-purple-400/40 text-purple-100 transition-all text-left shadow-[0_0_12px_rgba(168,85,247,0.2)]"
-                  >
-                    <div className="flex items-center gap-2">
-                      <Settings className="w-4 h-4 text-purple-300" />
-                      <div className="flex flex-col">
-                        <span className="font-semibold text-xs text-white">System Settings</span>
-                        <span className="text-[9px] text-purple-300/80 font-sans">API Keys, Gemini & Options</span>
-                      </div>
-                    </div>
-                    <span className="text-[9px] px-2 py-0.5 rounded bg-purple-600 text-white font-bold uppercase tracking-wider">
-                      OPEN
-                    </span>
-                  </button>
-
-                  {/* App Lifecycle & Vault Recovery */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      audioSynth.playNodeClick(700);
-                      setIsBackupModalOpen(true);
-                      setIsOptionsMenuOpen(false);
-                    }}
-                    className="flex items-center justify-between p-2.5 rounded-xl bg-indigo-950/50 hover:bg-indigo-900/70 border border-indigo-500/40 text-indigo-200 transition-all text-left"
-                  >
-                    <div className="flex items-center gap-2">
-                      <Download className="w-4 h-4 text-indigo-400" />
-                      <div className="flex flex-col">
-                        <span className="font-semibold text-xs text-indigo-100">Export / Restore Vault</span>
-                        <span className="text-[9px] text-indigo-300/80 font-sans">Zero-Loss Memory Backup</span>
-                      </div>
-                    </div>
-                    <span className="text-[9px] px-2 py-0.5 rounded bg-indigo-900/80 text-indigo-200 font-bold uppercase tracking-wider">
-                      VAULT
-                    </span>
-                  </button>
-
-                  {/* Upload Attachments / Files */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      audioSynth.playNodeClick(500);
-                      fileInputRef.current?.click();
-                      setIsOptionsMenuOpen(false);
-                    }}
-                    className="flex items-center justify-between p-2.5 rounded-xl bg-purple-950/50 hover:bg-purple-900/70 border border-purple-500/30 text-purple-200 transition-all text-left"
-                  >
-                    <div className="flex items-center gap-2">
-                      <Paperclip className="w-4 h-4 text-purple-400" />
-                      <div className="flex flex-col">
-                        <span className="font-semibold text-xs text-purple-100">Attach Media / Files</span>
-                        <span className="text-[9px] text-purple-300/60 font-sans">Images, Videos, Audio, Docs</span>
-                      </div>
-                    </div>
-                    <span className="text-[9px] px-2 py-0.5 rounded bg-purple-900/80 text-purple-200 font-bold uppercase tracking-wider">
-                      UPLOAD
-                    </span>
-                  </button>
-
-                  <div className="h-[1px] bg-purple-500/20 my-0.5" />
-
-                  {/* Option 1: Mic Input Toggle */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      toggleMic();
-                    }}
-                    className={`flex items-center justify-between p-2.5 rounded-xl border transition-all text-left ${
-                      isListening
-                        ? 'bg-purple-900/60 border-purple-400 text-white shadow-[0_0_15px_rgba(168,85,247,0.3)]'
-                        : 'bg-zinc-900/60 border-purple-500/20 text-purple-200 hover:bg-purple-950/40'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      {isListening ? (
-                        <Mic className="w-4 h-4 text-purple-300 animate-pulse" />
-                      ) : (
-                        <MicOff className="w-4 h-4 text-zinc-500" />
-                      )}
-                      <div className="flex flex-col">
-                        <span className="font-semibold text-xs">Mic Input</span>
-                        <span className="text-[9px] text-purple-300/60 font-sans">Voice speech input</span>
-                      </div>
-                    </div>
-                    <span
-                      className={`text-[9px] px-2 py-0.5 rounded font-bold uppercase tracking-wider ${
-                        isListening ? 'bg-purple-600 text-white' : 'bg-zinc-800 text-zinc-400'
-                      }`}
-                    >
-                      {isListening ? 'ACTIVE' : 'OFF'}
-                    </span>
-                  </button>
-
-                  {/* Option 2: Speaker Voice Toggle */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      audioSynth.playNodeClick(voiceEnabled ? 300 : 800);
-                      setVoiceEnabled(!voiceEnabled);
-                    }}
-                    className={`flex items-center justify-between p-2.5 rounded-xl border transition-all text-left ${
-                      voiceEnabled
-                        ? 'bg-purple-900/60 border-purple-400 text-white'
-                        : 'bg-zinc-900/60 border-purple-500/20 text-zinc-400 hover:bg-purple-950/40'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      {voiceEnabled ? (
-                        <Volume2 className="w-4 h-4 text-purple-300" />
-                      ) : (
-                        <VolumeX className="w-4 h-4 text-zinc-500" />
-                      )}
-                      <div className="flex flex-col">
-                        <span className="font-semibold text-xs">Speaker Output</span>
-                        <span className="text-[9px] text-purple-300/60 font-sans">Speech audio synthesis</span>
-                      </div>
-                    </div>
-                    <span
-                      className={`text-[9px] px-2 py-0.5 rounded font-bold uppercase tracking-wider ${
-                        voiceEnabled ? 'bg-purple-600 text-white' : 'bg-zinc-800 text-zinc-400'
-                      }`}
-                    >
-                      {voiceEnabled ? 'ACTIVE' : 'MUTED'}
-                    </span>
-                  </button>
-
-                  {/* Option 3: Clear Chat */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      audioSynth.playNodeClick(400);
-                      setMessages(INITIAL_MESSAGES);
-                      setIsOptionsMenuOpen(false);
-                    }}
-                    className="flex items-center justify-between p-2.5 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 border border-rose-500/30 text-rose-300 transition-all text-left"
-                  >
-                    <div className="flex items-center gap-2">
-                      <Trash2 className="w-4 h-4 text-rose-400" />
-                      <div className="flex flex-col">
-                        <span className="font-semibold text-xs text-rose-200">Clear Chat</span>
-                        <span className="text-[9px] text-rose-300/60 font-sans">Reset message stream</span>
-                      </div>
-                    </div>
-                    <span className="text-[9px] px-2 py-0.5 rounded bg-rose-900/80 text-rose-100 font-bold uppercase tracking-wider">
-                      CLEAR
-                    </span>
-                  </button>
-                </motion.div>
-              </>
-            )}
-          </AnimatePresence>
         </div>
       </div>
 
@@ -830,7 +645,6 @@ export const ChatView: React.FC = () => {
                         <button
                           onClick={() => {
                             audioSynth.playNodeClick(300);
-                            const resolved = approvalGate.resolve_proposal(msg.stagedAction!.proposalId, false);
                             setMessages((prev) =>
                               prev.map((m) =>
                                 m.id === msg.id
@@ -839,7 +653,7 @@ export const ChatView: React.FC = () => {
                                       stagedAction: {
                                         ...m.stagedAction!,
                                         status: 'REJECTED',
-                                        executionResult: resolved.execution_result,
+                                        executionResult: 'Rejected by Creator Arno/Arie.',
                                       },
                                     }
                                   : m
@@ -853,25 +667,19 @@ export const ChatView: React.FC = () => {
                         <button
                           onClick={() => {
                             audioSynth.playNodeClick(700);
-                            const resolved = approvalGate.resolve_proposal(msg.stagedAction!.proposalId, true);
-                            setMessages((prev) =>
-                              prev.map((m) =>
-                                m.id === msg.id
-                                  ? {
-                                      ...m,
-                                      stagedAction: {
-                                        ...m.stagedAction!,
-                                        status: 'EXECUTED',
-                                        executionResult: resolved.execution_result,
-                                      },
-                                    }
-                                  : m
-                              )
-                            );
+                            setActiveProposal({
+                              toolName: msg.stagedAction!.tool_name,
+                              args: {
+                                filePath: msg.stagedAction!.arguments?.filePath || msg.stagedAction!.arguments?.file_path,
+                                command: msg.stagedAction!.arguments?.command,
+                                content: msg.stagedAction!.arguments?.content,
+                                reason: msg.stagedAction!.arguments?.reason || msg.stagedAction!.arguments?.reasoning || 'Staged action execution',
+                              },
+                            });
                           }}
-                          className="px-4 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg shadow-md flex items-center gap-1"
+                          className="px-4 py-1 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded-lg shadow-md flex items-center gap-1"
                         >
-                          <CheckCircle2 className="w-3.5 h-3.5" /> Approve & Execute
+                          <ShieldCheck className="w-3.5 h-3.5" /> Review & Sign Capability
                         </button>
                       </div>
                     ) : (

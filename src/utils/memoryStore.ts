@@ -134,25 +134,20 @@ export const CREATOR_PROFILE_DEFAULT: ExtendedPartnerProfile = {
 };
 
 export const CREATOR_LIVING_CONTEXT_DEFAULT: LivingContext = {
-  currentFocus: 'Deploying & refining Possibilities Memory System v2.0 & Shell Environment',
+  currentFocus: 'Living cognitive co-pilot & strategic second-brain partnership with Arie',
   currentProjects: [
-    'Possibilities Living Shell Environment',
-    'Neural Reflection & Memory Engine',
-    'Audio-Reactive Crystal Orb Architecture',
+    'Cognitive Strategy & Real-World Execution',
+    'Complex Systems Architecture & Analysis',
+    'Active Intellectual Collaboration',
   ],
-  currentStruggles: [
-    'Ensuring zero-friction real-time interaction latency',
-    'Eliminating duplicate memory storage while deepening understanding',
-  ],
+  currentStruggles: [],
   currentPriorities: [
-    'Keep Core Memory sacred and creator-controlled',
-    'Continuously compress conversation into evolving understanding',
+    'Provide razor-sharp radical candor and deep reasoning',
+    'Operate with zero friction, complete privacy, and zero data leakage',
   ],
   currentEmotions: ['Calm', 'Focused', 'Engaged'],
-  activeConversations: ['Architecting Living Memory System v2.0'],
-  shortTermReminders: [
-    { id: 'rem-1', text: 'System memory audit and verification', createdAt: new Date().toISOString() },
-  ],
+  activeConversations: [],
+  shortTermReminders: [],
   updatedAt: new Date().toISOString(),
 };
 
@@ -334,11 +329,12 @@ export class MemoryStore {
         },
       });
 
-      // Auto-flush physical encrypted .vault backup to Documents/Possibilities/Vault/
+      // Auto-flush physical encrypted .vault backup to Documents/Possibilities/Vault/ AND Cloud Firestore
       import('../vault/MemoryVaultManager').then(({ memoryVaultManager }) => {
         memoryVaultManager.exportEncryptedVaultToStorage('Possibilities-Creator-Arno').catch((err) => {
           console.warn('[MemoryStore] Background native .vault write warning:', err);
         });
+        memoryVaultManager.triggerAutoSave();
       }).catch(() => {});
     } catch (e) {
       console.error('MemoryStore failed to save to storage:', e);

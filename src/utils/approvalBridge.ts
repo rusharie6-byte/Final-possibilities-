@@ -3,41 +3,60 @@
 
 import { memoryStore } from './memoryStore';
 import { approvalEngine } from './approvalEngine';
+import { capabilityEngine, ExecutionCapability } from './capabilityEngine';
 import { CommitReceipt, MemoryWriteProposal, CodePatchProposal } from '../types';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { Capacitor } from '@capacitor/core';
 
 export interface StagedAction {
   id: string; // e.g. prop_a1b2c3
-  status: 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'EXECUTED' | 'FAILED';
+  status: 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'EXECUTED' | 'FAILED' | 'SUPERSEDED_BY_MODIFICATION';
   tool_name: 'propose_core_memory_update' | 'propose_file_write' | string;
   arguments: Record<string, any>;
   createdAt: string;
   execution_result?: string;
   receipt?: CommitReceipt;
+  capability?: ExecutionCapability;
 }
 
 export class ActionExecutor {
-  public static execute(tool_name: string, args: Record<string, any>): string {
+  /**
+   * Executes an action ONLY if accompanied by a valid Creator Capability Token.
+   */
+  public static async executeWithCapability(
+    tool_name: string,
+    args: Record<string, any>,
+    capability: ExecutionCapability
+  ): Promise<{ success: boolean; message: string }> {
+    const rawPayload = args.content || args.command || JSON.stringify(args);
+    const verification = await capabilityEngine.verifyAndExecute(capability, rawPayload, args.preState);
+
+    if (!verification.success) {
+      return { success: false, message: verification.error || 'Execution blocked by Capability Verification Pipeline.' };
+    }
+
     try {
       if (tool_name === 'propose_core_memory_update') {
-        return ActionExecutor._update_core_memory(
+        const res = ActionExecutor._update_core_memory(
           args.action || 'add',
           args.key || 'MemoryKey',
           args.content || '',
           args.reasoning || 'Proposed by reasoning engine'
         );
-      } else if (tool_name === 'propose_file_write') {
-        return ActionExecutor._write_file(
-          args.file_path || 'file.txt',
+        return { success: true, message: res };
+      } else if (tool_name === 'propose_file_write' || tool_name === 'propose_file_change') {
+        const res = ActionExecutor._write_file(
+          args.file_path || args.filePath || 'file.txt',
           args.content || '',
-          args.reasoning || 'Proposed code/config modification'
+          args.reasoning || 'Proposed code/config modification',
+          capability
         );
+        return { success: true, message: res };
       } else {
-        return `Error: Unknown tool ${tool_name}`;
+        return { success: false, message: `Error: Unknown tool ${tool_name}` };
       }
     } catch (e: any) {
-      return `Execution failed: ${e?.message || String(e)}`;
+      return { success: false, message: `Execution failed: ${e?.message || String(e)}` };
     }
   }
 
@@ -57,7 +76,7 @@ export class ActionExecutor {
     return `Core memory key '${key}' updated successfully (ID: ${item.id}).`;
   }
 
-  private static _write_file(filePath: string, content: string, reasoning: string): string {
+  private static _write_file(filePath: string, content: string, reasoning: string, capability: ExecutionCapability): string {
     // Stage as code patch proposal in approval engine
     const patch = approvalEngine.createProposal(
       `File write to ${filePath}`,
@@ -66,10 +85,8 @@ export class ActionExecutor {
       ['Pre-patch snapshot saved for instant rollback'],
       content.length > 500 ? content.substring(0, 500) + '...' : content
     );
-    // Auto-approve since this is executing after Creator sign-off
-    const appRes = approvalEngine.approveProposal(patch.id);
-
-    // Perform real physical file write (Native Capacitor Filesystem + LocalStorage fallback)
+    
+    // Perform physical file write (Native Capacitor Filesystem + LocalStorage fallback)
     let physicalWriteNote = '';
     try {
       if (typeof localStorage !== 'undefined' && localStorage) {
@@ -98,7 +115,7 @@ export class ActionExecutor {
       console.warn('[ActionExecutor] File write storage notice:', writeErr);
     }
 
-    return `File '${filePath}' written successfully.${physicalWriteNote} ${appRes.message}`;
+    return `File '${filePath}' written atomically under Capability ${capability.capabilityId}.${physicalWriteNote}`;
   }
 }
 
@@ -147,17 +164,6 @@ export class ApprovalGate {
       createdAt: new Date().toISOString(),
     };
 
-    // Synchronize with ApprovalEngine's proposal bridges
-    if (tool_name === 'propose_core_memory_update') {
-      approvalEngine.proposeMemoryWrite(
-        'core',
-        args.key || 'MemoryKey',
-        args.content || '',
-        args.reasoning || 'Staged tool request',
-        'creator_statement'
-      );
-    }
-
     const list = this.getStagedList();
     list.unshift(staged);
     this.saveStagedList(list);
@@ -175,8 +181,14 @@ export class ApprovalGate {
     return this.getStagedList();
   }
 
-  /** Processes Creator decision (Approve / Reject) */
-  public resolve_proposal(proposal_id: string, approved: boolean): StagedAction {
+  /**
+   * Resolves a proposal ONLY with a valid Creator-signed Capability Token.
+   */
+  public async resolve_with_capability(
+    proposal_id: string,
+    approved: boolean,
+    capability?: ExecutionCapability
+  ): Promise<StagedAction> {
     const list = this.getStagedList();
     const action = list.find((a) => a.id === proposal_id);
 
@@ -185,20 +197,30 @@ export class ApprovalGate {
     }
 
     if (approved) {
+      if (!capability) {
+        throw new Error('Approval rejected: Missing required Creator-Signed Execution Capability Token.');
+      }
       action.status = 'APPROVED';
-      const result = ActionExecutor.execute(action.tool_name, action.arguments);
-      action.status = 'EXECUTED';
-      action.execution_result = result;
+      action.capability = capability;
+      
+      const execResult = await ActionExecutor.executeWithCapability(action.tool_name, action.arguments, capability);
+      if (execResult.success) {
+        action.status = 'EXECUTED';
+        action.execution_result = execResult.message;
+      } else {
+        action.status = 'FAILED';
+        action.execution_result = execResult.message;
+      }
 
       action.receipt = {
         recordId: action.id,
         operationId: action.id,
         operation: action.tool_name === 'propose_core_memory_update' ? 'memory_write' : 'code_patch',
-        status: 'SUCCESS',
+        status: execResult.success ? 'SUCCESS' : 'REJECTED',
         timestamp: new Date().toISOString(),
         provenance: 'creator_statement',
-        verification: { writeConfirmed: true, readBackConfirmed: true, contextReloadConfirmed: true },
-        message: result,
+        verification: { writeConfirmed: execResult.success, readBackConfirmed: execResult.success, contextReloadConfirmed: execResult.success },
+        message: execResult.message,
       };
     } else {
       action.status = 'REJECTED';
