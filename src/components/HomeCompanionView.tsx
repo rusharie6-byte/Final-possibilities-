@@ -53,6 +53,7 @@ import { memoryVaultManager } from '../vault/MemoryVaultManager';
 import { masterBundleEngine } from '../utils/masterBundleEngine';
 import { offline3BEngine } from '../utils/offline3BEngine';
 import { getApiEndpoint, loggedFetch, getCustomGeminiApiKey } from '../lib/api';
+import { parseToolCall, isReadOnlyTool, executeReadOnlyTool, synthesizeToolFollowUp } from '../utils/toolBridge';
 
 interface HomeCompanionViewProps {
   systemMode: SystemMode;
@@ -430,8 +431,43 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
 
           if (res.ok) {
             const data = await res.json();
-            if (data.text) {
-              replyText = data.text;
+            
+            // Intercept tool calls (native functionCalls, candidate parts, or JSON strings)
+            const toolCall = parseToolCall(data);
+            if (toolCall && isReadOnlyTool(toolCall.name)) {
+              const toolResult = await executeReadOnlyTool(toolCall.name, toolCall.args || {});
+              replyText = await synthesizeToolFollowUp(
+                toolCall.name,
+                toolCall.args || {},
+                toolResult,
+                effectiveQuery,
+                fullSystemInstruction,
+                customApiKey || undefined
+              );
+            } else if (data.text) {
+              const textToolCall = parseToolCall(data.text);
+              if (textToolCall && isReadOnlyTool(textToolCall.name)) {
+                const toolResult = await executeReadOnlyTool(textToolCall.name, textToolCall.args || {});
+                replyText = await synthesizeToolFollowUp(
+                  textToolCall.name,
+                  textToolCall.args || {},
+                  toolResult,
+                  effectiveQuery,
+                  fullSystemInstruction,
+                  customApiKey || undefined
+                );
+              } else {
+                const trimmed = data.text.trim();
+                // Filter out raw tool JSON output from ever displaying as text
+                if (
+                  !trimmed.startsWith('{"functionCall":') &&
+                  !trimmed.startsWith('{"functionCalls":') &&
+                  !trimmed.startsWith('{"name": "github_api"') &&
+                  !trimmed.startsWith('{"name":"github_api"')
+                ) {
+                  replyText = data.text;
+                }
+              }
             }
           }
         } catch (netErr) {

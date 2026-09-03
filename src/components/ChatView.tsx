@@ -12,6 +12,7 @@ import { sovereignScavenger } from '../utils/sovereignScavenger';
 import { masterBundleEngine } from '../utils/masterBundleEngine';
 import { offline3BEngine } from '../utils/offline3BEngine';
 import { getApiEndpoint, loggedFetch, getCustomGeminiApiKey } from '../lib/api';
+import { parseToolCall, isReadOnlyTool, executeReadOnlyTool, synthesizeToolFollowUp } from '../utils/toolBridge';
 import { AiCreationStudioModal, StudioTabType } from './AiCreationStudioModal';
 import { MediaAttachmentCard } from './MediaAttachmentCard';
 import { SettingsModal } from './SettingsModal';
@@ -303,21 +304,9 @@ export const ChatView: React.FC = () => {
       let extractedCall: { name: string; args: any } | null = null;
       let stagedActionPayload: any = undefined;
 
-      // IF NO CUSTOM API KEY IS ENTERED: Run the 100% Offline 3B Cognitive Core Engine as First Priority
-      if (!customApiKey) {
-        setOfflineNotice('Possibilities 3B Local Engine Active (Zero Tokens Consumed) | 100% Offline');
-        const local3BRes = await offline3BEngine.generateResponse(
-          finalPromptText,
-          messages.map((m) => ({
-            role: m.sender === 'user' ? 'user' : 'model',
-            text: m.text,
-          })),
-          systemInstructionText
-        );
-        replyText = local3BRes.text;
-      } else {
-        // OPTIONAL ONLINE SECOND CHOICE: Runs only when user enters a custom API key in Settings
-        setOfflineNotice('Online Gemini Mode Active (Using Temporary User Key)');
+      // Try online backend AI Gateway first (supports server-side environment key or user settings key)
+      try {
+        setOfflineNotice(customApiKey ? 'Online Gemini Mode (Using Custom Key)' : 'Possibilities Engine Active');
         const apiUrl = getApiEndpoint('/api/gemini');
         const res = await loggedFetch(apiUrl, {
           method: 'POST',
@@ -325,7 +314,7 @@ export const ChatView: React.FC = () => {
           body: JSON.stringify({
             prompt: finalPromptText,
             systemInstruction: systemInstructionText,
-            customApiKey: customApiKey,
+            customApiKey: customApiKey || undefined,
             history: messages.map((m) => ({
               role: m.sender === 'user' ? 'user' : 'model',
               text: m.text,
@@ -339,109 +328,101 @@ export const ChatView: React.FC = () => {
           }),
         });
 
-        const data = await res.json();
+        if (res.ok) {
+          const data = await res.json();
 
-        // Extract function call either from native data.functionCalls or from stringified data.text
-        if (data.functionCalls && Array.isArray(data.functionCalls) && data.functionCalls.length > 0) {
-          extractedCall = data.functionCalls[0];
-        } else if (data.text && typeof data.text === 'string') {
-          const trimmed = data.text.trim();
-          if (trimmed.startsWith('{"functionCall":') || trimmed.startsWith('{"functionCalls":')) {
-            try {
-              const parsed = JSON.parse(trimmed);
-              if (parsed.functionCall) {
-                extractedCall = parsed.functionCall;
-              } else if (parsed.functionCalls && Array.isArray(parsed.functionCalls) && parsed.functionCalls.length > 0) {
-                extractedCall = parsed.functionCalls[0];
-              }
-            } catch {}
-          }
-        }
+          // Intercept function call from native data.functionCalls, candidates, or stringified text
+          extractedCall = parseToolCall(data);
 
-        if (data.fallback || data.error) {
-          setOfflineNotice('Possibilities 3B Local Engine Active (Zero Tokens Consumed) | Offline Fallback');
-          const local3BRes = await offline3BEngine.generateResponse(
-            finalPromptText,
-            messages.map((m) => ({
-              role: m.sender === 'user' ? 'user' : 'model',
-              text: m.text,
-            })),
-            systemInstructionText
-          );
-          replyText = local3BRes.text;
-        } else if (extractedCall) {
-          const fc = extractedCall;
+          if (data.fallback || data.error === 'NO_API_KEY') {
+            setOfflineNotice('Possibilities 3B Local Engine Active (Zero Tokens Consumed) | Offline Fallback');
+            const local3BRes = await offline3BEngine.generateResponse(
+              finalPromptText,
+              messages.map((m) => ({
+                role: m.sender === 'user' ? 'user' : 'model',
+                text: m.text,
+              })),
+              systemInstructionText
+            );
+            replyText = local3BRes.text;
+          } else if (extractedCall) {
+            const fc = extractedCall;
 
-          // A. READ-ONLY TOOLS (Auto-execute via /api/tools/read and feed output back to Gemini)
-          if (fc.name === 'list_directory' || fc.name === 'read_file') {
-            try {
-              const readRes = await loggedFetch(getApiEndpoint('/api/tools/read'), {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ toolName: fc.name, args: fc.args || {} }),
-              });
-              const readData = await readRes.json();
-
-              if (readData.success) {
-                const formattedContent = typeof readData.data === 'object' ? JSON.stringify(readData.data, null, 2) : String(readData.data);
-                
-                // Secondary request to Gemini to synthesize natural response from tool output
-                try {
-                  const secondPrompt = `[SYSTEM TOOL RESULT for ${fc.name}]:\n${formattedContent}\n\n[USER ORIGINAL REQUEST]:\n${finalPromptText}\n\nPlease analyze the tool output and provide a clear, helpful response to the user.`;
-                  const followUpRes = await loggedFetch(getApiEndpoint('/api/gemini'), {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      prompt: secondPrompt,
-                      systemInstruction: systemInstructionText,
-                      customApiKey: customApiKey || undefined,
-                    }),
-                  });
-                  const followUpData = await followUpRes.json();
-                  if (followUpData.text) {
-                    const trimmedFollowUp = followUpData.text.trim();
-                    if (!trimmedFollowUp.startsWith('{"functionCall":') && !trimmedFollowUp.startsWith('{"functionCalls":')) {
-                      replyText = followUpData.text;
-                    }
-                  }
-                } catch {
-                  replyText = `Read Tool Output (${fc.name}):\n\`\`\`\n${formattedContent}\n\`\`\``;
-                }
-              } else {
-                replyText = `Read Tool Error (${fc.name}): ${readData.error || 'Failed to read'}`;
-              }
-            } catch (readErr: any) {
-              replyText = `Read Tool Execution Error: ${readErr.message}`;
+            // A. READ-ONLY TOOLS (Auto-execute in background: github_api, fetch_url, list_directory, read_file)
+            if (isReadOnlyTool(fc.name)) {
+              const toolResult = await executeReadOnlyTool(fc.name, fc.args || {});
+              replyText = await synthesizeToolFollowUp(
+                fc.name,
+                fc.args || {},
+                toolResult,
+                finalPromptText,
+                systemInstructionText,
+                customApiKey || undefined
+              );
             }
-          } 
-          // B. MUTATIVE / WRITE TOOLS (Trigger Approval Gate Modal)
-          else if (fc.name === 'propose_file_change' || fc.name === 'propose_terminal_command' || fc.name === 'propose_file_write') {
-            setActiveProposal({
-              toolName: fc.name,
-              args: {
-                filePath: fc.args?.filePath || fc.args?.file_path,
-                command: fc.args?.command,
-                content: fc.args?.content,
-                reason: fc.args?.reason || fc.args?.reasoning || 'Proposed by AI system',
-              },
-            });
-            setIsSending(false);
-            return; // STOP EXECUTION HERE - Approval Gate modal handles output
-          } else {
-            setActiveProposal({
-              toolName: fc.name,
-              args: fc.args || {},
-            });
-            setIsSending(false);
-            return; // STOP EXECUTION HERE - Approval Gate modal handles output
-          }
-        } else if (data.text) {
-          // Filter out raw JSON functionCall text string representations
-          const trimmed = data.text.trim();
-          if (!trimmed.startsWith('{"functionCall":') && !trimmed.startsWith('{"functionCalls":')) {
-            replyText = data.text;
+            // B. MUTATIVE / WRITE TOOLS (Trigger Creator Approval Gate Modal)
+            else if (fc.name === 'propose_file_change' || fc.name === 'propose_terminal_command' || fc.name === 'propose_file_write') {
+              setActiveProposal({
+                toolName: fc.name,
+                args: {
+                  filePath: fc.args?.filePath || fc.args?.file_path,
+                  command: fc.args?.command,
+                  content: fc.args?.content,
+                  reason: fc.args?.reason || fc.args?.reasoning || 'Proposed by AI system',
+                },
+              });
+              setIsSending(false);
+              return; // STOP EXECUTION HERE - Approval Gate modal handles output
+            } else {
+              setActiveProposal({
+                toolName: fc.name,
+                args: fc.args || {},
+              });
+              setIsSending(false);
+              return;
+            }
+          } else if (data.text) {
+            // Check if string text contains raw unexecuted tool call JSON
+            const textToolCall = parseToolCall(data.text);
+            if (textToolCall && isReadOnlyTool(textToolCall.name)) {
+              const toolResult = await executeReadOnlyTool(textToolCall.name, textToolCall.args || {});
+              replyText = await synthesizeToolFollowUp(
+                textToolCall.name,
+                textToolCall.args || {},
+                toolResult,
+                finalPromptText,
+                systemInstructionText,
+                customApiKey || undefined
+              );
+            } else {
+              const trimmed = data.text.trim();
+              if (
+                !trimmed.startsWith('{"functionCall":') &&
+                !trimmed.startsWith('{"functionCalls":') &&
+                !trimmed.startsWith('{"name": "github_api"') &&
+                !trimmed.startsWith('{"name":"github_api"')
+              ) {
+                replyText = data.text;
+              }
+            }
           }
         }
+      } catch (gatewayErr) {
+        console.warn('[ChatView] Backend gateway error, executing offline 3B engine:', gatewayErr);
+      }
+
+      // Offline 3B fallback if no reply text was formed
+      if (!replyText) {
+        setOfflineNotice('Possibilities 3B Local Engine Active (Zero Tokens Consumed) | Offline');
+        const local3BRes = await offline3BEngine.generateResponse(
+          finalPromptText,
+          messages.map((m) => ({
+            role: m.sender === 'user' ? 'user' : 'model',
+            text: m.text,
+          })),
+          systemInstructionText
+        );
+        replyText = local3BRes.text;
       }
 
       if (!replyText) {

@@ -149,27 +149,72 @@ app.get("/api/vault/restore", (req, res) => {
   }
 });
 
-// PRIMARY GEMINI AI GATEWAY (OPTIONAL ONLINE FALLBACK - ONLY WHEN USER SUPPLIES API KEY IN SETTINGS)
+// Helper for resilient Gemini API calls with exponential backoff on 503 / 429 / network timeouts
+async function callGeminiWithRetry(
+  callFn: (modelName: string) => Promise<any>,
+  models: string[] = ["gemini-3.8-flash", "gemini-2.5-flash"],
+  maxRetriesPerModel: number = 2
+): Promise<any> {
+  let lastErr: any = null;
+  for (const model of models) {
+    for (let attempt = 0; attempt <= maxRetriesPerModel; attempt++) {
+      try {
+        const res = await callFn(model);
+        if (res) return res;
+      } catch (err: any) {
+        lastErr = err;
+        const msg = String(err?.message || err || '');
+        const isTransient =
+          msg.includes('503') ||
+          msg.includes('429') ||
+          msg.includes('overloaded') ||
+          msg.includes('high demand') ||
+          msg.includes('Service Unavailable') ||
+          msg.includes('ResourceExhausted') ||
+          msg.includes('ECONNRESET') ||
+          msg.includes('ETIMEDOUT');
+
+        console.warn(`[Gemini Attempt] Model ${model} (attempt ${attempt + 1}/${maxRetriesPerModel + 1}) failed: ${msg}`);
+        if (isTransient && attempt < maxRetriesPerModel) {
+          const delay = (attempt + 1) * 1200 + Math.floor(Math.random() * 600);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          continue;
+        }
+        break; // Try next model candidate
+      }
+    }
+  }
+  throw lastErr || new Error("All Gemini model generation attempts exhausted.");
+}
+
+// PRIMARY GEMINI AI GATEWAY
 app.post("/api/gemini", async (req, res) => {
   try {
-    let clientApiKey = req.headers["x-gemini-api-key"] as string || req.headers["x-api-key"] as string;
+    let clientApiKey = (req.headers["x-gemini-api-key"] as string) || (req.headers["x-api-key"] as string);
     if (!clientApiKey && typeof req.body?.customApiKey === "string" && req.body.customApiKey.trim()) {
       clientApiKey = req.body.customApiKey.trim();
     }
 
-    // Only allow API calls if a client has explicitly entered a key in App Settings
-    const apiKey = clientApiKey;
+    // Support client custom key OR server-side process.env.GEMINI_API_KEY
+    const apiKey = clientApiKey || process.env.GEMINI_API_KEY;
     if (!apiKey) {
       return res.status(200).json({ 
         fallback: true,
         offline: true,
-        error: "NO_CUSTOM_API_KEY",
-        message: "Possibilities 3B Local Offline Engine active. User has not provided a temporary custom API key in Settings."
+        error: "NO_API_KEY",
+        message: "Possibilities 3B Local Offline Engine active. No Gemini API key provided on server or client."
       });
     }
 
     const { contents: bodyContents, prompt, systemInstruction, history, attachments, config = {} } = req.body;
-    const ai = new GoogleGenAI({ apiKey });
+    const ai = new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        },
+      },
+    });
 
     // Handle both raw contents or structured prompt/history payloads
     let contents = bodyContents;
@@ -231,29 +276,14 @@ app.post("/api/gemini", async (req, res) => {
       mergedConfig.systemInstruction = systemInstruction;
     }
 
-    let response: any;
-    const modelCandidates = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
-    let lastError: any = null;
-
-    for (const modelName of modelCandidates) {
-      try {
-        response = await ai.models.generateContent({
-          model: modelName,
-          contents: contents,
-          config: mergedConfig,
-        });
-        if (response) {
-          break;
-        }
-      } catch (err: any) {
-        lastError = err;
-        console.warn(`Attempt with ${modelName} failed:`, err?.message || err);
-      }
-    }
-
-    if (!response) {
-      throw lastError || new Error("All Gemini model generation attempts failed.");
-    }
+    // Initial turn with automatic model retry (gemini-3.8-flash -> gemini-2.5-flash)
+    let response = await callGeminiWithRetry((modelName) =>
+      ai.models.generateContent({
+        model: modelName,
+        contents: contents,
+        config: mergedConfig,
+      })
+    );
 
     // Automated Read-Only Tool Execution Loop (up to 4 tool-assisted turns)
     let currentResponse = response;
@@ -286,27 +316,38 @@ app.post("/api/gemini", async (req, res) => {
         try {
           if (call.name === "fetch_url") {
             const fetchRes = await fetch(call.args?.url, {
-              headers: { 'User-Agent': 'Mozilla/5.0 Possibilities/3.0 (Autonomous Companion)' }
+              headers: { 'User-Agent': 'Possibilities-App' }
             });
             const textContent = await fetchRes.text();
             resultData = textContent.slice(0, 150000); // cap to safe token size
           } else if (call.name === "github_api") {
-            const owner = call.args?.owner;
-            const repo = call.args?.repo;
-            const repoPath = call.args?.path ? `/${call.args.path.replace(/^\//, '')}` : '';
-            const queryRef = call.args?.ref ? `?ref=${call.args.ref}` : '';
-            const ghUrl = `https://api.github.com/repos/${owner}/${repo}/contents${repoPath}${queryRef}`;
-            const ghRes = await fetch(ghUrl, {
-              headers: {
-                'Accept': 'application/vnd.github.v3+json',
-                'User-Agent': 'Possibilities-System-Companion'
-              }
-            });
+            const owner = String(call.args?.owner || "rusharie6-byte").trim();
+            const repo = String(call.args?.repo || "Final-possibilities-").trim();
+            let rawPath = String(call.args?.path || "").trim().replace(/^\//, "");
+            const pathSegment = rawPath ? `/${rawPath}` : "";
+            const queryRef = call.args?.ref ? `?ref=${encodeURIComponent(call.args.ref)}` : "";
+            const ghUrl = `https://api.github.com/repos/${owner}/${repo}/contents${pathSegment}${queryRef}`;
+            
+            const ghHeaders: Record<string, string> = {
+              'Accept': 'application/vnd.github.v3+json',
+              'User-Agent': 'Possibilities-App',
+            };
+            if (process.env.GITHUB_TOKEN) {
+              ghHeaders['Authorization'] = `Bearer ${process.env.GITHUB_TOKEN}`;
+            }
+
+            const ghRes = await fetch(ghUrl, { headers: ghHeaders });
             const ghJson: any = await ghRes.json();
             if (ghJson && !Array.isArray(ghJson) && ghJson.content && ghJson.encoding === 'base64') {
-              ghJson.decodedContent = Buffer.from(ghJson.content, 'base64').toString('utf-8');
+              try {
+                ghJson.decodedContent = Buffer.from(ghJson.content, 'base64').toString('utf-8');
+              } catch {}
             }
-            resultData = ghJson;
+            resultData = {
+              status: ghRes.status,
+              url: ghUrl,
+              data: ghJson,
+            };
           } else if (call.name === "list_directory") {
             const targetPath = path.resolve(process.cwd(), call.args?.dirPath || ".");
             const files = await fs.readdir(targetPath, { withFileTypes: true });
@@ -322,7 +363,10 @@ app.post("/api/gemini", async (req, res) => {
         toolResponses.push({
           functionResponse: {
             name: call.name,
-            response: { content: resultData }
+            ...(call.id ? { id: call.id } : {}),
+            response: {
+              output: resultData,
+            },
           }
         });
       }
@@ -334,17 +378,55 @@ app.post("/api/gemini", async (req, res) => {
       const modelParts = currentResponse.candidates?.[0]?.content?.parts || [];
       updatedContents.push({ role: 'model', parts: modelParts });
 
-      // Push function responses
+      // Push function responses turn
       updatedContents.push({ role: 'user', parts: toolResponses });
 
       try {
-        currentResponse = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
-          contents: updatedContents,
-          config: mergedConfig,
-        });
-      } catch (retryErr) {
-        console.warn("Followup generation with tool response failed:", retryErr);
+        currentResponse = await callGeminiWithRetry((modelName) =>
+          ai.models.generateContent({
+            model: modelName,
+            contents: updatedContents,
+            config: mergedConfig,
+          })
+        );
+      } catch (retryErr: any) {
+        console.warn("Followup generation with tool response hit timeout/error:", retryErr?.message || retryErr);
+        // CRITICAL RECOVERY: If Gemini dropped with 503, synthesize an authentic response from the tool results
+        // so raw tool JSON or a crashed session is NEVER sent to the user.
+        let synthesizedFallbackText = "";
+        for (const tr of toolResponses) {
+          const fnName = tr.functionResponse?.name;
+          const output = tr.functionResponse?.response?.output;
+          if (fnName === "github_api") {
+            const status = output?.status;
+            const data = output?.data;
+            const targetUrl = output?.url;
+            if (status === 200) {
+              if (Array.isArray(data)) {
+                const fileList = data.map((item: any) => `• ${item.type === 'dir' ? '📁' : '📄'} **${item.name}**`).join('\n');
+                synthesizedFallbackText += `I queried the GitHub repository at \`${targetUrl}\`:\n\n### Repository Contents:\n${fileList}\n\n`;
+              } else if (data?.decodedContent) {
+                synthesizedFallbackText += `I inspected \`${targetUrl}\`:\n\n\`\`\`\n${data.decodedContent.slice(0, 3000)}\n\`\`\`\n\n`;
+              } else {
+                synthesizedFallbackText += `I queried \`${targetUrl}\`:\n\`\`\`json\n${JSON.stringify(data, null, 2).slice(0, 2000)}\n\`\`\`\n\n`;
+              }
+            } else if (status === 404) {
+              synthesizedFallbackText += `I queried the GitHub repository at \`${targetUrl}\`, but GitHub returned **404 Not Found**. If the repository is private, unauthenticated requests cannot view it without a GitHub token, or the repository name/casing should be verified. You can also share files directly with the 📎 paperclip button in chat!\n\n`;
+            } else {
+              synthesizedFallbackText += `I queried GitHub at \`${targetUrl}\` (status ${status}): ${data?.message || JSON.stringify(data)}\n\n`;
+            }
+          } else if (fnName === "fetch_url") {
+            synthesizedFallbackText += `Fetched content from URL:\n${String(output).slice(0, 2000)}\n\n`;
+          } else if (fnName === "list_directory" || fnName === "read_file") {
+            synthesizedFallbackText += `Filesystem output for ${fnName}:\n${JSON.stringify(output, null, 2).slice(0, 2000)}\n\n`;
+          }
+        }
+
+        currentResponse = {
+          text: synthesizedFallbackText.trim() || "Tool execution completed successfully.",
+          functionCalls: null,
+          candidates: [{ content: { parts: [{ text: synthesizedFallbackText.trim() }] } }],
+        };
         break;
       }
     }
@@ -382,29 +464,36 @@ app.post("/api/tools/read", async (req, res) => {
 
     if (toolName === "fetch_url") {
       const fetchRes = await fetch(args.url, {
-        headers: { 'User-Agent': 'Mozilla/5.0 Possibilities/3.0 (Autonomous Companion)' }
+        headers: { 'User-Agent': 'Possibilities-App' }
       });
       const textContent = await fetchRes.text();
       return res.json({ success: true, data: textContent.slice(0, 150000) });
     }
 
     if (toolName === "github_api") {
-      const owner = args.owner;
-      const repo = args.repo;
-      const repoPath = args.path ? `/${args.path.replace(/^\//, '')}` : '';
-      const queryRef = args.ref ? `?ref=${args.ref}` : '';
-      const ghUrl = `https://api.github.com/repos/${owner}/${repo}/contents${repoPath}${queryRef}`;
-      const ghRes = await fetch(ghUrl, {
-        headers: {
-          'Accept': 'application/vnd.github.v3+json',
-          'User-Agent': 'Possibilities-System-Companion'
-        }
-      });
+      const owner = String(args?.owner || "rusharie6-byte").trim();
+      const repo = String(args?.repo || "Final-possibilities-").trim();
+      let rawPath = String(args?.path || "").trim().replace(/^\//, "");
+      const pathSegment = rawPath ? `/${rawPath}` : "";
+      const queryRef = args?.ref ? `?ref=${encodeURIComponent(args.ref)}` : "";
+      const ghUrl = `https://api.github.com/repos/${owner}/${repo}/contents${pathSegment}${queryRef}`;
+      
+      const ghHeaders: Record<string, string> = {
+        'Accept': 'application/vnd.github.v3+json',
+        'User-Agent': 'Possibilities-App',
+      };
+      if (process.env.GITHUB_TOKEN) {
+        ghHeaders['Authorization'] = `Bearer ${process.env.GITHUB_TOKEN}`;
+      }
+
+      const ghRes = await fetch(ghUrl, { headers: ghHeaders });
       const ghJson: any = await ghRes.json();
       if (ghJson && !Array.isArray(ghJson) && ghJson.content && ghJson.encoding === 'base64') {
-        ghJson.decodedContent = Buffer.from(ghJson.content, 'base64').toString('utf-8');
+        try {
+          ghJson.decodedContent = Buffer.from(ghJson.content, 'base64').toString('utf-8');
+        } catch {}
       }
-      return res.json({ success: true, data: ghJson });
+      return res.json({ success: true, data: ghJson, url: ghUrl, status: ghRes.status });
     }
 
     return res.status(400).json({ error: "Invalid read tool or write tool attempted on read endpoint." });
