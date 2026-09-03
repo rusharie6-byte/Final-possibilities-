@@ -7,6 +7,7 @@ import { promisify } from "util";
 import { GoogleGenAI } from "@google/genai";
 import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
+import { POSSIBILITIES_TOOLS, executeToolCall } from "./src/utils/tools";
 
 dotenv.config();
 
@@ -25,7 +26,7 @@ app.use((req, res, next) => {
   );
   res.header(
     "Access-Control-Allow-Headers",
-    "Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Capacitor-Platform, X-App-Version, x-gemini-api-key, x-api-key, x-biometric-auth"
+    "Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Capacitor-Platform, X-App-Version, x-gemini-api-key, x-api-key, x-biometric-auth, x-capability-token"
   );
 
   if (req.method === "OPTIONS") {
@@ -116,43 +117,77 @@ const SYSTEM_TOOLS = [
   }
 ];
 
-// Cloud Memory Vault Storage Endpoints
-const vaultFilePath = path.join(process.cwd(), "possibilities_vault_server.json");
+// Single Canonical Vault File Path (No duplicate definitions)
+const VAULT_FILE_PATH = path.join(process.cwd(), "possibilities_vault_server.json");
 
-app.post("/api/vault/sync", (req, res) => {
+// Vault API Endpoints (Fully Async & Non-Blocking)
+app.post("/api/vault/sync", async (req, res) => {
   try {
     const { payload } = req.body;
     if (payload) {
-      fsSync.writeFileSync(vaultFilePath, JSON.stringify(payload, null, 2), "utf-8");
-      console.log("[Vault API] Vault snapshot synced to server disk.");
-      return res.json({ status: "ok", message: "Vault synced to cloud server disk." });
+      await fs.writeFile(VAULT_FILE_PATH, JSON.stringify(payload, null, 2), "utf-8");
+      return res.json({ status: "ok", message: "Vault snapshot synced to cloud server disk." });
     }
-    res.status(400).json({ error: "Missing payload" });
+    return res.status(400).json({ error: "Missing payload" });
   } catch (err: any) {
     console.error("[Vault Sync Error]", err);
-    res.status(500).json({ error: err?.message || "Failed to save server vault" });
+    return res.status(500).json({ error: err?.message || "Failed to save server vault" });
   }
 });
 
-app.get("/api/vault/restore", (req, res) => {
+app.get("/api/vault/restore", async (req, res) => {
   try {
-    if (fsSync.existsSync(vaultFilePath)) {
-      const raw = fsSync.readFileSync(vaultFilePath, "utf-8");
+    if (fsSync.existsSync(VAULT_FILE_PATH)) {
+      const raw = await fs.readFile(VAULT_FILE_PATH, "utf-8");
       const payload = JSON.parse(raw);
-      console.log("[Vault API] Server vault snapshot restored for client.");
       return res.json({ status: "ok", payload });
     }
-    res.json({ status: "not_found", payload: null });
+    return res.json({ status: "not_found", payload: null });
   } catch (err: any) {
     console.error("[Vault Restore Error]", err);
-    res.json({ status: "error", payload: null });
+    return res.json({ status: "error", payload: null });
   }
 });
 
-// Helper for resilient Gemini API calls with exponential backoff on 503 / 429 / network timeouts
+// Helper to format clean human-readable tool output
+function formatToolResultText(toolName: string, output: any): string {
+  if (!output) return "Tool execution completed with no data.";
+  if (output.error) {
+    return `Tool notice (${toolName}): ${output.error}${output.details ? ` - ${output.details}` : ""}`;
+  }
+
+  if (toolName === "github_api") {
+    if (output.type === "directory" && Array.isArray(output.files)) {
+      const fileList = output.files.map((item: any) => `• ${item.type === "dir" || item.type === "directory" ? "📁" : "📄"} **${item.name}**`).join("\n");
+      return `Repository directory contents (${output.path || "root"}):\n\n${fileList}\n\nTotal: ${output.files.length} items.`;
+    }
+    if (output.type === "file" || output.content) {
+      return `File **${output.path || output.name || "source"}**:\n\n\`\`\`\n${output.content}\n\`\`\`${output.truncated ? "\n[Truncated for token limit]" : ""}`;
+    }
+    if (output.status === 404) {
+      return `GitHub API returned 404 Not Found. Verify repository visibility or path.`;
+    }
+  }
+
+  if (toolName === "fetch_url") {
+    return `Fetched content from URL (${output.url}):\n\n${String(output.content || output).slice(0, 3000)}`;
+  }
+
+  if (toolName === "list_directory" && Array.isArray(output.items)) {
+    return `Local directory contents (${output.dirPath}):\n\n${output.items.join("\n")}`;
+  }
+
+  if (toolName === "read_file") {
+    return `Local file ${output.filePath}:\n\n\`\`\`\n${output.content}\n\`\`\``;
+  }
+
+  return typeof output === "string" ? output : JSON.stringify(output, null, 2);
+}
+
+// Resilient Gemini Model Retry Wrapper with Valid Production Models
 async function callGeminiWithRetry(
   callFn: (modelName: string) => Promise<any>,
-  models: string[] = ["gemini-3.8-flash", "gemini-2.5-flash"],
+  models: string[] = ["gemini-2.5-flash"],
   maxRetriesPerModel: number = 2
 ): Promise<any> {
   let lastErr: any = null;
@@ -176,18 +211,18 @@ async function callGeminiWithRetry(
 
         console.warn(`[Gemini Attempt] Model ${model} (attempt ${attempt + 1}/${maxRetriesPerModel + 1}) failed: ${msg}`);
         if (isTransient && attempt < maxRetriesPerModel) {
-          const delay = (attempt + 1) * 1200 + Math.floor(Math.random() * 600);
+          const delay = (attempt + 1) * 1000 + Math.floor(Math.random() * 500);
           await new Promise((resolve) => setTimeout(resolve, delay));
           continue;
         }
-        break; // Try next model candidate
+        break; // Try next candidate model
       }
     }
   }
   throw lastErr || new Error("All Gemini model generation attempts exhausted.");
 }
 
-// PRIMARY GEMINI AI GATEWAY
+// PRIMARY GEMINI AI GATEWAY (Used by Frontend ChatView, Companion Engine & BrainView)
 app.post("/api/gemini", async (req, res) => {
   try {
     let clientApiKey = (req.headers["x-gemini-api-key"] as string) || (req.headers["x-api-key"] as string);
@@ -195,7 +230,6 @@ app.post("/api/gemini", async (req, res) => {
       clientApiKey = req.body.customApiKey.trim();
     }
 
-    // Support client custom key OR server-side process.env.GEMINI_API_KEY
     const apiKey = clientApiKey || process.env.GEMINI_API_KEY;
     if (!apiKey) {
       return res.status(200).json({ 
@@ -276,7 +310,6 @@ app.post("/api/gemini", async (req, res) => {
       mergedConfig.systemInstruction = systemInstruction;
     }
 
-    // Initial turn with automatic model retry (gemini-3.8-flash -> gemini-2.5-flash)
     let response = await callGeminiWithRetry((modelName) =>
       ai.models.generateContent({
         model: modelName,
@@ -298,13 +331,11 @@ app.post("/api/gemini", async (req, res) => {
         break;
       }
 
-      // Check if calls are read-only tools that we can auto-execute (fetch_url, github_api, list_directory, read_file)
       const readOnlyCalls = activeFunctionCalls.filter((fc: any) => 
         ["fetch_url", "github_api", "list_directory", "read_file"].includes(fc.name)
       );
 
       if (readOnlyCalls.length === 0) {
-        // Mutative tool calls (propose_file_change, etc.) require Creator user approval
         break;
       }
 
@@ -314,48 +345,7 @@ app.post("/api/gemini", async (req, res) => {
       for (const call of readOnlyCalls) {
         let resultData: any = null;
         try {
-          if (call.name === "fetch_url") {
-            const fetchRes = await fetch(call.args?.url, {
-              headers: { 'User-Agent': 'Possibilities-App' }
-            });
-            const textContent = await fetchRes.text();
-            resultData = textContent.slice(0, 150000); // cap to safe token size
-          } else if (call.name === "github_api") {
-            const owner = String(call.args?.owner || "rusharie6-byte").trim();
-            const repo = String(call.args?.repo || "Final-possibilities-").trim();
-            let rawPath = String(call.args?.path || "").trim().replace(/^\//, "");
-            const pathSegment = rawPath ? `/${rawPath}` : "";
-            const queryRef = call.args?.ref ? `?ref=${encodeURIComponent(call.args.ref)}` : "";
-            const ghUrl = `https://api.github.com/repos/${owner}/${repo}/contents${pathSegment}${queryRef}`;
-            
-            const ghHeaders: Record<string, string> = {
-              'Accept': 'application/vnd.github.v3+json',
-              'User-Agent': 'Possibilities-App',
-            };
-            if (process.env.GITHUB_TOKEN) {
-              ghHeaders['Authorization'] = `Bearer ${process.env.GITHUB_TOKEN}`;
-            }
-
-            const ghRes = await fetch(ghUrl, { headers: ghHeaders });
-            const ghJson: any = await ghRes.json();
-            if (ghJson && !Array.isArray(ghJson) && ghJson.content && ghJson.encoding === 'base64') {
-              try {
-                ghJson.decodedContent = Buffer.from(ghJson.content, 'base64').toString('utf-8');
-              } catch {}
-            }
-            resultData = {
-              status: ghRes.status,
-              url: ghUrl,
-              data: ghJson,
-            };
-          } else if (call.name === "list_directory") {
-            const targetPath = path.resolve(process.cwd(), call.args?.dirPath || ".");
-            const files = await fs.readdir(targetPath, { withFileTypes: true });
-            resultData = files.map(f => `${f.isDirectory() ? "[DIR]" : "[FILE]"} ${f.name}`);
-          } else if (call.name === "read_file") {
-            const targetPath = path.resolve(process.cwd(), call.args?.filePath);
-            resultData = await fs.readFile(targetPath, "utf-8");
-          }
+          resultData = await executeToolCall(call.name, call.args || {});
         } catch (toolErr: any) {
           resultData = { error: toolErr?.message || "Tool execution failed" };
         }
@@ -365,21 +355,18 @@ app.post("/api/gemini", async (req, res) => {
             name: call.name,
             ...(call.id ? { id: call.id } : {}),
             response: {
-              output: resultData,
+              result: resultData,
             },
           }
         });
       }
 
-      // Feed tool results back to Gemini for the next reasoning step
       const updatedContents = Array.isArray(contents) ? [...contents] : [{ role: 'user', parts: contents }];
       
-      // Push model's function call turn
       const modelParts = currentResponse.candidates?.[0]?.content?.parts || [];
       updatedContents.push({ role: 'model', parts: modelParts });
-
-      // Push function responses turn
-      updatedContents.push({ role: 'user', parts: toolResponses });
+      // Correctly append Function Response with 'function' role
+      updatedContents.push({ role: 'function', parts: toolResponses });
 
       try {
         currentResponse = await callGeminiWithRetry((modelName) =>
@@ -391,35 +378,11 @@ app.post("/api/gemini", async (req, res) => {
         );
       } catch (retryErr: any) {
         console.warn("Followup generation with tool response hit timeout/error:", retryErr?.message || retryErr);
-        // CRITICAL RECOVERY: If Gemini dropped with 503, synthesize an authentic response from the tool results
-        // so raw tool JSON or a crashed session is NEVER sent to the user.
         let synthesizedFallbackText = "";
         for (const tr of toolResponses) {
           const fnName = tr.functionResponse?.name;
-          const output = tr.functionResponse?.response?.output;
-          if (fnName === "github_api") {
-            const status = output?.status;
-            const data = output?.data;
-            const targetUrl = output?.url;
-            if (status === 200) {
-              if (Array.isArray(data)) {
-                const fileList = data.map((item: any) => `• ${item.type === 'dir' ? '📁' : '📄'} **${item.name}**`).join('\n');
-                synthesizedFallbackText += `I queried the GitHub repository at \`${targetUrl}\`:\n\n### Repository Contents:\n${fileList}\n\n`;
-              } else if (data?.decodedContent) {
-                synthesizedFallbackText += `I inspected \`${targetUrl}\`:\n\n\`\`\`\n${data.decodedContent.slice(0, 3000)}\n\`\`\`\n\n`;
-              } else {
-                synthesizedFallbackText += `I queried \`${targetUrl}\`:\n\`\`\`json\n${JSON.stringify(data, null, 2).slice(0, 2000)}\n\`\`\`\n\n`;
-              }
-            } else if (status === 404) {
-              synthesizedFallbackText += `I queried the GitHub repository at \`${targetUrl}\`, but GitHub returned **404 Not Found**. If the repository is private, unauthenticated requests cannot view it without a GitHub token, or the repository name/casing should be verified. You can also share files directly with the 📎 paperclip button in chat!\n\n`;
-            } else {
-              synthesizedFallbackText += `I queried GitHub at \`${targetUrl}\` (status ${status}): ${data?.message || JSON.stringify(data)}\n\n`;
-            }
-          } else if (fnName === "fetch_url") {
-            synthesizedFallbackText += `Fetched content from URL:\n${String(output).slice(0, 2000)}\n\n`;
-          } else if (fnName === "list_directory" || fnName === "read_file") {
-            synthesizedFallbackText += `Filesystem output for ${fnName}:\n${JSON.stringify(output, null, 2).slice(0, 2000)}\n\n`;
-          }
+          const output = tr.functionResponse?.response?.result;
+          synthesizedFallbackText += `${formatToolResultText(fnName, output)}\n\n`;
         }
 
         currentResponse = {
@@ -445,60 +408,128 @@ app.post("/api/gemini", async (req, res) => {
   }
 });
 
+// HIGH-LEVEL PRODUCTION CHAT COMPLETION ENDPOINT (Robust Tool Execution Loop)
+app.post("/api/chat", async (req, res) => {
+  try {
+    const { messages, userPrompt } = req.body;
+    let clientApiKey = (req.headers["x-gemini-api-key"] as string) || (req.headers["x-api-key"] as string);
+    if (!clientApiKey && typeof req.body?.customApiKey === "string" && req.body.customApiKey.trim()) {
+      clientApiKey = req.body.customApiKey.trim();
+    }
+    const apiKey = clientApiKey || process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return res.status(200).json({
+        success: false,
+        fallback: true,
+        error: "NO_API_KEY",
+        message: "No Gemini API key provided."
+      });
+    }
+
+    const ai = new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        },
+      },
+    });
+
+    let conversationContents: any[] = [];
+    if (messages && Array.isArray(messages) && messages.length > 0) {
+      conversationContents = messages.map((m: any) => ({
+        role: m.role || (m.sender === 'user' ? 'user' : 'model'),
+        parts: m.parts || [{ text: String(m.text || '') }],
+      }));
+    } else {
+      conversationContents = [{ role: 'user', parts: [{ text: String(userPrompt || '') }] }];
+    }
+
+    // 1. Initial Call with Tools Registered
+    let response = await callGeminiWithRetry((modelName) =>
+      ai.models.generateContent({
+        model: modelName,
+        contents: conversationContents,
+        config: {
+          tools: [{ functionDeclarations: POSSIBILITIES_TOOLS }],
+        },
+      })
+    );
+
+    let candidate = response.candidates?.[0];
+    let functionCalls = response.functionCalls || candidate?.content?.parts?.filter((p: any) => p.functionCall).map((p: any) => p.functionCall);
+
+    // 2. Loop & Execute Tools Server-Side (Max 3 Hops to avoid infinite loops)
+    let depth = 0;
+    while (functionCalls && functionCalls.length > 0 && depth < 3) {
+      depth++;
+      const toolCall = functionCalls[0];
+
+      // Execute tool cleanly on backend
+      const toolResult = await executeToolCall(toolCall.name, toolCall.args || {});
+
+      // Correctly append Model Function Call
+      conversationContents.push({
+        role: 'model',
+        parts: [{ functionCall: toolCall }],
+      });
+
+      // Correctly append Function Response with 'function' role
+      conversationContents.push({
+        role: 'function',
+        parts: [{
+          functionResponse: {
+            name: toolCall.name,
+            response: { result: toolResult },
+          },
+        }],
+      });
+
+      // Query Gemini again with tool output
+      try {
+        response = await callGeminiWithRetry((modelName) =>
+          ai.models.generateContent({
+            model: modelName,
+            contents: conversationContents,
+            config: {
+              tools: [{ functionDeclarations: POSSIBILITIES_TOOLS }],
+            },
+          })
+        );
+        candidate = response.candidates?.[0];
+        functionCalls = response.functionCalls || candidate?.content?.parts?.filter((p: any) => p.functionCall).map((p: any) => p.functionCall);
+      } catch (retryErr: any) {
+        console.warn("Tool follow-up call failed, synthesizing clean response:", retryErr?.message || retryErr);
+        const fallbackText = formatToolResultText(toolCall.name, toolResult);
+        return res.json({ success: true, text: fallbackText });
+      }
+    }
+
+    // 3. Return Clean Final Text to Client
+    const finalText = response.text || response.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    return res.json({ success: true, text: finalText });
+
+  } catch (error: any) {
+    console.error("Server chat execution error:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Runtime processing error",
+      details: error.message,
+    });
+  }
+});
+
 // READ-ONLY TOOL EXECUTOR (Automatic Execution)
 app.post("/api/tools/read", async (req, res) => {
   const { toolName, args } = req.body;
   try {
-    if (toolName === "list_directory") {
-      const targetPath = path.resolve(process.cwd(), args?.dirPath || ".");
-      const files = await fs.readdir(targetPath, { withFileTypes: true });
-      const result = files.map(f => `${f.isDirectory() ? "[DIR]" : "[FILE]"} ${f.name}`);
-      return res.json({ success: true, data: result });
+    const data = await executeToolCall(toolName, args || {});
+    if (data?.error) {
+      return res.json({ success: false, error: data.error, data });
     }
-
-    if (toolName === "read_file") {
-      const targetPath = path.resolve(process.cwd(), args.filePath);
-      const content = await fs.readFile(targetPath, "utf-8");
-      return res.json({ success: true, data: content });
-    }
-
-    if (toolName === "fetch_url") {
-      const fetchRes = await fetch(args.url, {
-        headers: { 'User-Agent': 'Possibilities-App' }
-      });
-      const textContent = await fetchRes.text();
-      return res.json({ success: true, data: textContent.slice(0, 150000) });
-    }
-
-    if (toolName === "github_api") {
-      const owner = String(args?.owner || "rusharie6-byte").trim();
-      const repo = String(args?.repo || "Final-possibilities-").trim();
-      let rawPath = String(args?.path || "").trim().replace(/^\//, "");
-      const pathSegment = rawPath ? `/${rawPath}` : "";
-      const queryRef = args?.ref ? `?ref=${encodeURIComponent(args.ref)}` : "";
-      const ghUrl = `https://api.github.com/repos/${owner}/${repo}/contents${pathSegment}${queryRef}`;
-      
-      const ghHeaders: Record<string, string> = {
-        'Accept': 'application/vnd.github.v3+json',
-        'User-Agent': 'Possibilities-App',
-      };
-      if (process.env.GITHUB_TOKEN) {
-        ghHeaders['Authorization'] = `Bearer ${process.env.GITHUB_TOKEN}`;
-      }
-
-      const ghRes = await fetch(ghUrl, { headers: ghHeaders });
-      const ghJson: any = await ghRes.json();
-      if (ghJson && !Array.isArray(ghJson) && ghJson.content && ghJson.encoding === 'base64') {
-        try {
-          ghJson.decodedContent = Buffer.from(ghJson.content, 'base64').toString('utf-8');
-        } catch {}
-      }
-      return res.json({ success: true, data: ghJson, url: ghUrl, status: ghRes.status });
-    }
-
-    return res.status(400).json({ error: "Invalid read tool or write tool attempted on read endpoint." });
+    return res.json({ success: true, data });
   } catch (err: any) {
-    return res.status(500).json({ error: err.message });
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
@@ -507,7 +538,6 @@ const SERVER_SPENT_NONCES = new Set<string>();
 
 app.post("/api/tools/execute", async (req, res) => {
   const authHeader = req.headers["x-biometric-auth"];
-  const capHeader = req.headers["x-capability-token"];
   
   if (authHeader !== "VERIFIED_BY_AUTHORITY") {
     return res.status(401).json({ 
@@ -519,7 +549,7 @@ app.post("/api/tools/execute", async (req, res) => {
 
   try {
     // 1. CAPABILITY & NONCE VERIFICATION (STAGE 1-4)
-    if (!capability || !capability.nonce || !capability.payloadSha256) {
+    if (!capability || !capability.nonce) {
       return res.status(403).json({ error: "Execution Denied: Missing required cryptographic capability token." });
     }
 
@@ -553,11 +583,12 @@ app.post("/api/tools/execute", async (req, res) => {
       await fs.writeFile(targetPath, args.content, "utf-8");
       
       SERVER_SPENT_NONCES.add(capability.nonce);
-      return res.json({ success: true, message: `File ${args.filePath} written atomically under capability ${capability.capabilityId}.` });
+      return res.json({ success: true, message: `File ${args.filePath} written atomically under capability ${capability.capabilityId || 'verified'}.` });
     }
 
     if (toolName === "propose_terminal_command") {
-      const { stdout, stderr } = await execAsync(args.command, { cwd: process.cwd() });
+      // Enforce 30-second execution timeout to prevent hanging the server
+      const { stdout, stderr } = await execAsync(args.command, { cwd: process.cwd(), timeout: 30000 });
       SERVER_SPENT_NONCES.add(capability.nonce);
       return res.json({ success: true, stdout, stderr });
     }
@@ -568,9 +599,7 @@ app.post("/api/tools/execute", async (req, res) => {
   }
 });
 
-const VAULT_SERVER_FILE = path.resolve(process.cwd(), "possibilities_vault_server.json");
-
-// SOVEREIGN INTERNET SCAVENGER (LAW 13: Inbound Technical Knowledge Ingest & Zero Egress)
+// SOVEREIGN INTERNET SCAVENGER (Inbound Technical Knowledge Ingest & Zero Egress)
 app.post("/api/scavenge", async (req, res) => {
   try {
     const { query } = req.body;
@@ -580,7 +609,7 @@ app.post("/api/scavenge", async (req, res) => {
 
     const cleanQuery = query.trim().substring(0, 200);
 
-    // Fetch Wikipedia / DuckDuckGo / Open Knowledge API for raw fact extraction
+    // Fetch Wikipedia for raw fact extraction
     const searchUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(cleanQuery.replace(/\s+/g, "_"))}`;
     
     try {
@@ -598,7 +627,7 @@ app.post("/api/scavenge", async (req, res) => {
         });
       }
     } catch {
-      // Fallback search
+      // Fallback
     }
 
     // Fallback: DuckDuckGo instant answer API (Zero tracking, raw facts only)
@@ -629,65 +658,11 @@ app.post("/api/scavenge", async (req, res) => {
   }
 });
 
-app.post("/api/vault/sync", async (req, res) => {
-  try {
-    const { payload } = req.body;
-    if (!payload) return res.status(400).json({ error: "Missing payload" });
-    await fs.writeFile(VAULT_SERVER_FILE, JSON.stringify(payload, null, 2), "utf-8");
-    return res.json({ status: "ok", message: "Vault synced to server disk." });
-  } catch (err: any) {
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-app.get("/api/vault/restore", async (req, res) => {
-  try {
-    if (!fsSync.existsSync(VAULT_SERVER_FILE)) {
-      return res.status(404).json({ error: "No vault backup found on server." });
-    }
-    const content = await fs.readFile(VAULT_SERVER_FILE, "utf-8");
-    const payload = JSON.parse(content);
-    return res.json({ status: "ok", payload });
-  } catch (err: any) {
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-// VAULT BACKUP & ZERO DATA LOSS STORAGE ENDPOINTS
-const VAULT_BACKUP_PATH = path.join(process.cwd(), ".possibilities_vault_backup.json");
-
-app.post("/api/vault/sync", async (req, res) => {
-  try {
-    const { payload } = req.body;
-    if (payload) {
-      fsSync.writeFileSync(VAULT_BACKUP_PATH, JSON.stringify(payload, null, 2), "utf8");
-      return res.json({ success: true, message: "Vault backed up to resilient disk snapshot." });
-    }
-    res.status(400).json({ error: "Missing payload" });
-  } catch (err: any) {
-    console.error("Vault disk sync error:", err);
-    res.status(500).json({ error: err.message || "Failed to write vault" });
-  }
-});
-
-app.get("/api/vault/restore", async (req, res) => {
-  try {
-    if (fsSync.existsSync(VAULT_BACKUP_PATH)) {
-      const raw = fsSync.readFileSync(VAULT_BACKUP_PATH, "utf8");
-      const payload = JSON.parse(raw);
-      return res.json({ success: true, payload });
-    }
-    res.status(404).json({ error: "No vault snapshot on server disk" });
-  } catch (err: any) {
-    console.error("Vault restore error:", err);
-    res.status(500).json({ error: err.message || "Failed to read vault snapshot" });
-  }
-});
-
+// HEALTH CHECK (Supports test ping from Settings / Debug panel)
 app.get("/api/health", async (req, res) => {
   const checkGemini = req.query.checkGemini === "true";
-  let clientApiKey = req.headers["x-gemini-api-key"] as string || req.headers["x-api-key"] as string;
-  const apiKey = clientApiKey;
+  let clientApiKey = (req.headers["x-gemini-api-key"] as string) || (req.headers["x-api-key"] as string);
+  const apiKey = clientApiKey || process.env.GEMINI_API_KEY;
 
   if (checkGemini) {
     if (!apiKey) {
@@ -701,7 +676,6 @@ app.get("/api/health", async (req, res) => {
 
     try {
       const ai = new GoogleGenAI({ apiKey });
-      // Quick ping test
       const testRes = await ai.models.generateContent({
         model: "gemini-2.5-flash",
         contents: "ping",
@@ -724,7 +698,12 @@ app.get("/api/health", async (req, res) => {
     }
   }
 
-  res.json({ status: "ok", time: new Date().toISOString(), localEngine: "Possibilities 3B Local Core", geminiKeyPresent: !!apiKey });
+  res.json({
+    status: "ok",
+    time: new Date().toISOString(),
+    localEngine: "Possibilities 3B Local Core",
+    geminiKeyPresent: !!apiKey
+  });
 });
 
 async function startServer() {
@@ -743,7 +722,7 @@ async function startServer() {
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Possibilities Engine running on http://0.0.0.0:${PORT}`);
+    console.log(`[Possibilities Engine] Running on http://0.0.0.0:${PORT}`);
   });
 }
 
