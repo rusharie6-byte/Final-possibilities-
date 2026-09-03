@@ -53,13 +53,38 @@ const SYSTEM_TOOLS = [
       },
       {
         name: "read_file",
-        description: "Read raw contents of a source code or config file.",
+        description: "Read raw contents of a source code or config file from local project.",
         parameters: {
           type: "OBJECT",
           properties: {
             filePath: { type: "STRING", description: "Relative file path (e.g., 'src/App.tsx')" }
           },
           required: ["filePath"]
+        }
+      },
+      {
+        name: "fetch_url",
+        description: "Fetch and read raw text, source code, or JSON from any public HTTP/HTTPS URL (including raw.githubusercontent.com or web pages).",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            url: { type: "STRING", description: "Full HTTP or HTTPS URL to fetch content from" }
+          },
+          required: ["url"]
+        }
+      },
+      {
+        name: "github_api",
+        description: "Query GitHub REST API to list repo directories, file contents, branches, or commits. Can inspect repos directly.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            owner: { type: "STRING", description: "GitHub username or organization (e.g. 'rusharie6-byte')" },
+            repo: { type: "STRING", description: "GitHub repository name (e.g. 'Final-possibilities-')" },
+            path: { type: "STRING", description: "Path to file or directory in repository (e.g. '' for root or 'src/App.tsx')" },
+            ref: { type: "STRING", description: "Optional git branch, tag, or commit SHA (defaults to default branch)" }
+          },
+          required: ["owner", "repo"]
         }
       },
       {
@@ -230,13 +255,107 @@ app.post("/api/gemini", async (req, res) => {
       throw lastError || new Error("All Gemini model generation attempts failed.");
     }
 
-    const functionCalls = response.functionCalls || response.candidates?.[0]?.content?.parts?.filter((p: any) => p.functionCall).map((p: any) => p.functionCall);
+    // Automated Read-Only Tool Execution Loop (up to 4 tool-assisted turns)
+    let currentResponse = response;
+    let turnCount = 0;
+    const maxToolTurns = 4;
+
+    while (turnCount < maxToolTurns) {
+      const activeFunctionCalls = currentResponse.functionCalls || 
+        currentResponse.candidates?.[0]?.content?.parts?.filter((p: any) => p.functionCall).map((p: any) => p.functionCall);
+
+      if (!activeFunctionCalls || activeFunctionCalls.length === 0) {
+        break;
+      }
+
+      // Check if calls are read-only tools that we can auto-execute (fetch_url, github_api, list_directory, read_file)
+      const readOnlyCalls = activeFunctionCalls.filter((fc: any) => 
+        ["fetch_url", "github_api", "list_directory", "read_file"].includes(fc.name)
+      );
+
+      if (readOnlyCalls.length === 0) {
+        // Mutative tool calls (propose_file_change, etc.) require Creator user approval
+        break;
+      }
+
+      turnCount++;
+      const toolResponses: any[] = [];
+
+      for (const call of readOnlyCalls) {
+        let resultData: any = null;
+        try {
+          if (call.name === "fetch_url") {
+            const fetchRes = await fetch(call.args?.url, {
+              headers: { 'User-Agent': 'Mozilla/5.0 Possibilities/3.0 (Autonomous Companion)' }
+            });
+            const textContent = await fetchRes.text();
+            resultData = textContent.slice(0, 150000); // cap to safe token size
+          } else if (call.name === "github_api") {
+            const owner = call.args?.owner;
+            const repo = call.args?.repo;
+            const repoPath = call.args?.path ? `/${call.args.path.replace(/^\//, '')}` : '';
+            const queryRef = call.args?.ref ? `?ref=${call.args.ref}` : '';
+            const ghUrl = `https://api.github.com/repos/${owner}/${repo}/contents${repoPath}${queryRef}`;
+            const ghRes = await fetch(ghUrl, {
+              headers: {
+                'Accept': 'application/vnd.github.v3+json',
+                'User-Agent': 'Possibilities-System-Companion'
+              }
+            });
+            const ghJson: any = await ghRes.json();
+            if (ghJson && !Array.isArray(ghJson) && ghJson.content && ghJson.encoding === 'base64') {
+              ghJson.decodedContent = Buffer.from(ghJson.content, 'base64').toString('utf-8');
+            }
+            resultData = ghJson;
+          } else if (call.name === "list_directory") {
+            const targetPath = path.resolve(process.cwd(), call.args?.dirPath || ".");
+            const files = await fs.readdir(targetPath, { withFileTypes: true });
+            resultData = files.map(f => `${f.isDirectory() ? "[DIR]" : "[FILE]"} ${f.name}`);
+          } else if (call.name === "read_file") {
+            const targetPath = path.resolve(process.cwd(), call.args?.filePath);
+            resultData = await fs.readFile(targetPath, "utf-8");
+          }
+        } catch (toolErr: any) {
+          resultData = { error: toolErr?.message || "Tool execution failed" };
+        }
+
+        toolResponses.push({
+          functionResponse: {
+            name: call.name,
+            response: { content: resultData }
+          }
+        });
+      }
+
+      // Feed tool results back to Gemini for the next reasoning step
+      const updatedContents = Array.isArray(contents) ? [...contents] : [{ role: 'user', parts: contents }];
+      
+      // Push model's function call turn
+      const modelParts = currentResponse.candidates?.[0]?.content?.parts || [];
+      updatedContents.push({ role: 'model', parts: modelParts });
+
+      // Push function responses
+      updatedContents.push({ role: 'user', parts: toolResponses });
+
+      try {
+        currentResponse = await ai.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: updatedContents,
+          config: mergedConfig,
+        });
+      } catch (retryErr) {
+        console.warn("Followup generation with tool response failed:", retryErr);
+        break;
+      }
+    }
+
+    const finalFunctionCalls = currentResponse.functionCalls || currentResponse.candidates?.[0]?.content?.parts?.filter((p: any) => p.functionCall).map((p: any) => p.functionCall);
 
     res.json({
-      text: response.text || null,
-      functionCalls: functionCalls || null,
-      candidates: response.candidates,
-      usageMetadata: response.usageMetadata,
+      text: currentResponse.text || null,
+      functionCalls: finalFunctionCalls || null,
+      candidates: currentResponse.candidates,
+      usageMetadata: currentResponse.usageMetadata,
     });
   } catch (error: any) {
     console.error("Gemini API Error:", error);
@@ -259,6 +378,33 @@ app.post("/api/tools/read", async (req, res) => {
       const targetPath = path.resolve(process.cwd(), args.filePath);
       const content = await fs.readFile(targetPath, "utf-8");
       return res.json({ success: true, data: content });
+    }
+
+    if (toolName === "fetch_url") {
+      const fetchRes = await fetch(args.url, {
+        headers: { 'User-Agent': 'Mozilla/5.0 Possibilities/3.0 (Autonomous Companion)' }
+      });
+      const textContent = await fetchRes.text();
+      return res.json({ success: true, data: textContent.slice(0, 150000) });
+    }
+
+    if (toolName === "github_api") {
+      const owner = args.owner;
+      const repo = args.repo;
+      const repoPath = args.path ? `/${args.path.replace(/^\//, '')}` : '';
+      const queryRef = args.ref ? `?ref=${args.ref}` : '';
+      const ghUrl = `https://api.github.com/repos/${owner}/${repo}/contents${repoPath}${queryRef}`;
+      const ghRes = await fetch(ghUrl, {
+        headers: {
+          'Accept': 'application/vnd.github.v3+json',
+          'User-Agent': 'Possibilities-System-Companion'
+        }
+      });
+      const ghJson: any = await ghRes.json();
+      if (ghJson && !Array.isArray(ghJson) && ghJson.content && ghJson.encoding === 'base64') {
+        ghJson.decodedContent = Buffer.from(ghJson.content, 'base64').toString('utf-8');
+      }
+      return res.json({ success: true, data: ghJson });
     }
 
     return res.status(400).json({ error: "Invalid read tool or write tool attempted on read endpoint." });

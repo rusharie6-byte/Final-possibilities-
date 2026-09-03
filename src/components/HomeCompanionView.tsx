@@ -40,6 +40,7 @@ import {
   Gamepad2,
   Package,
   FileCheck,
+  Paperclip,
 } from 'lucide-react';
 import { SystemMode, MediaAttachment } from '../types';
 import { AmbientParticlesCanvas } from './AmbientParticlesCanvas';
@@ -88,6 +89,83 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
   const [micPermissionNotice, setMicPermissionNotice] = useState<string | null>(null);
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
   const [isOptionsMenuOpen, setIsOptionsMenuOpen] = useState(false);
+
+  // 📎 File Attachment State for Chat
+  interface AttachedFileItem {
+    name: string;
+    size: number;
+    type: string;
+    content: string; // text content or data URL
+    isText: boolean;
+  }
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFileItem[]>([]);
+  const chatFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleChatFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    audioSynth.playNodeClick(600);
+
+    const newAttachments: AttachedFileItem[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const isText = file.type.startsWith('text/') || 
+        file.type.includes('json') || 
+        file.type.includes('javascript') || 
+        file.type.includes('typescript') || 
+        file.name.endsWith('.md') || 
+        file.name.endsWith('.ts') || 
+        file.name.endsWith('.tsx') || 
+        file.name.endsWith('.js') || 
+        file.name.endsWith('.jsx') || 
+        file.name.endsWith('.txt') || 
+        file.name.endsWith('.py') || 
+        file.name.endsWith('.html') || 
+        file.name.endsWith('.css') || 
+        file.name.endsWith('.env') || 
+        file.name.endsWith('.yaml') || 
+        file.name.endsWith('.yml');
+
+      try {
+        if (isText) {
+          const text = await file.text();
+          newAttachments.push({
+            name: file.name,
+            size: file.size,
+            type: file.type || 'text/plain',
+            content: text,
+            isText: true,
+          });
+        } else {
+          // Read base64 data URL for images/binaries
+          const reader = new FileReader();
+          const dataUrl = await new Promise<string>((resolve) => {
+            reader.onload = () => resolve(reader.result as string);
+            reader.readAsDataURL(file);
+          });
+          newAttachments.push({
+            name: file.name,
+            size: file.size,
+            type: file.type || 'application/octet-stream',
+            content: dataUrl,
+            isText: false,
+          });
+        }
+      } catch (err) {
+        console.warn('Failed to read file:', file.name, err);
+      }
+    }
+
+    setAttachedFiles((prev) => [...prev, ...newAttachments]);
+    if (chatFileInputRef.current) {
+      chatFileInputRef.current.value = '';
+    }
+  };
+
+  const removeAttachedFile = (index: number) => {
+    audioSynth.playNodeClick(400);
+    setAttachedFiles((prev) => prev.filter((_, i) => i !== index));
+  };
 
   // 🔮 POSSIBILITIES Voice Output Toggle (Speaker ON / OFF)
   const [isPossibilitiesVoiceOn, setIsPossibilitiesVoiceOn] = useState(true);
@@ -250,11 +328,32 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
 
       const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
+      const currentAttachments = [...attachedFiles];
+      setAttachedFiles([]);
+
+      let effectiveQuery = query;
+      if (currentAttachments.length > 0) {
+        const fileSummaries = currentAttachments.map((f) => {
+          if (f.isText) {
+            return `\n\n--- ATTACHED FILE: ${f.name} ---\n${f.content.slice(0, 100000)}\n--- END FILE: ${f.name} ---`;
+          } else {
+            return `\n\n[ATTACHED MEDIA FILE: ${f.name} (${f.type}, ${Math.round(f.size / 1024)} KB)]`;
+          }
+        }).join('\n');
+        effectiveQuery = `${query}\n\n${fileSummaries}`;
+      }
+
       const userMsg: ChatMsg = {
         id: `u-${Date.now()}`,
         sender: 'user',
         text: query,
         timestamp: timeStr,
+        mediaAttachments: currentAttachments.map((f) => ({
+          type: f.isText ? 'code' : 'image',
+          title: f.name,
+          url: !f.isText ? f.content : undefined,
+          codeSnippet: f.isText ? f.content.slice(0, 1000) : undefined,
+        })),
       };
 
       // Snapshot conversation history before appending new user message
@@ -322,7 +421,7 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              prompt: userQuery,
+              prompt: effectiveQuery,
               systemInstruction: fullSystemInstruction,
               customApiKey: customApiKey || undefined,
               history: conversationHistory,
@@ -342,7 +441,7 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
         // If backend unavailable or returned null, use 100% Offline 3B Cognitive Core Engine
         if (!replyText) {
           const local3BRes = await offline3BEngine.generateResponse(
-            userQuery,
+            effectiveQuery,
             conversationHistory.map((h) => ({
               role: h.role === 'user' ? 'user' : 'model',
               text: h.text,
@@ -1150,6 +1249,39 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
           </button>
         </div>
 
+        {/* Attached Files Staging Area */}
+        {attachedFiles.length > 0 && (
+          <div className="flex items-center gap-2 overflow-x-auto custom-scrollbar px-2 py-1.5 bg-zinc-950/90 rounded-xl border border-purple-500/40">
+            {attachedFiles.map((file, idx) => (
+              <div
+                key={idx}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-purple-950/80 border border-purple-400/40 text-xs text-purple-200 shrink-0 font-mono shadow-sm"
+              >
+                <Paperclip className="w-3 h-3 text-purple-400 shrink-0" />
+                <span className="max-w-[140px] truncate" title={file.name}>{file.name}</span>
+                <span className="text-[10px] text-purple-400/70">({Math.round(file.size / 1024)}KB)</span>
+                <button
+                  type="button"
+                  onClick={() => removeAttachedFile(idx)}
+                  className="p-0.5 hover:text-rose-400 text-purple-300 transition-colors ml-0.5"
+                  title="Remove file"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Hidden File Input for Paperclip Attachment */}
+        <input
+          type="file"
+          ref={chatFileInputRef}
+          onChange={handleChatFileSelected}
+          multiple
+          className="hidden"
+        />
+
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -1157,20 +1289,33 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
           }}
           className="relative flex items-center w-full"
         >
+          {/* Paperclip Button */}
+          <button
+            type="button"
+            onClick={() => {
+              audioSynth.playNodeClick(500);
+              chatFileInputRef.current?.click();
+            }}
+            title="Attach file, code, or document"
+            className="absolute left-2 z-10 p-2 rounded-full text-purple-400 hover:text-purple-200 hover:bg-purple-950/60 transition-all cursor-pointer"
+          >
+            <Paperclip className="w-4 h-4" />
+          </button>
+
           <input
             type="text"
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
-            placeholder={isListening ? 'Listening to voice...' : 'Type a message to Possibilities...'}
+            placeholder={isListening ? 'Listening to voice...' : 'Type a message to Possibilities or attach files...'}
             disabled={isProcessing}
-            className="w-full py-3.5 pl-5 pr-14 rounded-full bg-zinc-950/90 border border-purple-500/40 text-sm text-purple-100 placeholder:text-zinc-500 focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-500/30 shadow-[0_15px_35px_rgba(0,0,0,0.95)] backdrop-blur-2xl transition-all"
+            className="w-full py-3.5 pl-11 pr-14 rounded-full bg-zinc-950/90 border border-purple-500/40 text-sm text-purple-100 placeholder:text-zinc-500 focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-500/30 shadow-[0_15px_35px_rgba(0,0,0,0.95)] backdrop-blur-2xl transition-all"
           />
 
           <div className="absolute right-2 flex items-center">
             {/* Submit Button */}
             <button
               type="submit"
-              disabled={!inputText.trim() || isProcessing}
+              disabled={(!inputText.trim() && attachedFiles.length === 0) || isProcessing}
               className="p-2 rounded-full bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-30 transition-all shadow-[0_0_15px_rgba(168,85,247,0.4)]"
             >
               <Send className="w-4 h-4" />
