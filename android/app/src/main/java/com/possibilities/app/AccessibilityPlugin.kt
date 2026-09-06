@@ -1,5 +1,6 @@
 package com.possibilities.app
 
+import com.getcapacitor.JSObject
 import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
@@ -16,7 +17,9 @@ class AccessibilityPlugin : Plugin() {
             return
         }
         val screenData = service.dumpScreenTree()
-        call.resolve(com.getcapacitor.JSObject().put("screen", screenData))
+        val ret = JSObject()
+        ret.put("screen", screenData)
+        call.resolve(ret)
     }
 
     @PluginMethod
@@ -29,6 +32,8 @@ class AccessibilityPlugin : Plugin() {
         val x = call.getFloat("x") ?: 0f
         val y = call.getFloat("y") ?: 0f
         val success = service.tapCoordinates(x, y)
-        call.resolve(com.getcapacitor.JSObject().put("success", success))
+        val ret = JSObject()
+        ret.put("success", success)
+        call.resolve(ret)
     }
 }
