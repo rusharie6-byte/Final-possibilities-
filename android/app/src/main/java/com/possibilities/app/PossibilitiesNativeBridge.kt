@@ -41,12 +41,19 @@ class PossibilitiesNativeBridge : Plugin() {
     @PluginMethod
     fun setKeepScreenOn(call: PluginCall) {
         val enable = call.getBoolean("enable", true) ?: true
-        activity.runOnUiThread {
-            if (enable) {
-                activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            } else {
-                activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        val act = activity
+        if (act != null) {
+            act.runOnUiThread {
+                if (enable) {
+                    act.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                } else {
+                    act.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                }
+                val ret = JSObject()
+                ret.put("keepScreenOn", enable)
+                call.resolve(ret)
             }
+        } else {
             val ret = JSObject()
             ret.put("keepScreenOn", enable)
             call.resolve(ret)
