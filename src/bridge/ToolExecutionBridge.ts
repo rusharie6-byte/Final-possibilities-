@@ -14,6 +14,7 @@ import { law9Firewall } from '../tools/Law9Firewall';
 import { crtEngine } from '../crt/CRTEngine';
 import { memoryStore } from '../utils/memoryStore';
 import { storageEngine } from '../utils/storageEngine';
+import { possibilitiesNativeBridge } from '../utils/nativeBridge';
 
 export interface ToolExecutionResult {
   toolName: string;
@@ -145,6 +146,28 @@ export class ToolExecutionBridge {
           const reasoning = args.reasoning || 'Creator requested manual vault export';
           const success = storageEngine.exportVaultFileDownload();
           stdout = `VAULT EXPORT EXECUTED SUCCESSFULLY:\nReasoning: ${reasoning}\nFile Status: Download file generated and dispatched to device downloads.`;
+          break;
+        }
+
+        case 'read_screen': {
+          const res = await possibilitiesNativeBridge.readScreen();
+          if (res.success && res.screen) {
+            stdout = res.screen;
+          } else {
+            stderr = res.error || 'Accessibility Service inactive. Please enable in Android Settings > Accessibility.';
+          }
+          break;
+        }
+
+        case 'tap_screen': {
+          const targetX = Number(args.x) || 0;
+          const targetY = Number(args.y) || 0;
+          const res = await possibilitiesNativeBridge.tapScreen(targetX, targetY);
+          if (res.success) {
+            stdout = `TAP DISPATCHED: Coords (${targetX}, ${targetY}) executed via Accessibility Service.`;
+          } else {
+            stderr = res.error || `Failed to dispatch tap gesture to (${targetX}, ${targetY}).`;
+          }
           break;
         }
 

@@ -10,6 +10,14 @@ import com.getcapacitor.annotation.CapacitorPlugin
 class AccessibilityPlugin : Plugin() {
 
     @PluginMethod
+    fun checkStatus(call: PluginCall) {
+        val service = PossibilitiesAccessibilityService.instance
+        val ret = JSObject()
+        ret.put("active", service != null)
+        call.resolve(ret)
+    }
+
+    @PluginMethod
     fun readScreen(call: PluginCall) {
         val service = PossibilitiesAccessibilityService.instance
         if (service == null) {

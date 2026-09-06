@@ -87,10 +87,41 @@ export const EXPORT_VAULT_BACKUP_SCHEMA: ToolFunctionDeclaration = {
   },
 };
 
+export const READ_SCREEN_SCHEMA: ToolFunctionDeclaration = {
+  name: 'read_screen',
+  description: 'Inspects and reads the current Android screen accessibility tree, returning visible text, UI view IDs, clickable nodes, and coordinate bounds.',
+  parameters: {
+    type: 'OBJECT',
+    properties: {},
+    required: [],
+  },
+};
+
+export const TAP_SCREEN_SCHEMA: ToolFunctionDeclaration = {
+  name: 'tap_screen',
+  description: 'Dispatches an autonomous simulated tap gesture on the Android device at target screen pixel coordinates (x, y).',
+  parameters: {
+    type: 'OBJECT',
+    properties: {
+      x: {
+        type: 'NUMBER',
+        description: 'The horizontal X coordinate in screen pixels to tap.',
+      },
+      y: {
+        type: 'NUMBER',
+        description: 'The vertical Y coordinate in screen pixels to tap.',
+      },
+    },
+    required: ['x', 'y'],
+  },
+};
+
 export const POSSIBILITIES_SYSTEM_TOOLS: ToolFunctionDeclaration[] = [
   EXECUTE_SHELL_COMMAND_SCHEMA,
   READ_FILE_SCHEMA,
   WRITE_FILE_SCHEMA,
   SYSTEM_DIAGNOSTICS_SCHEMA,
   EXPORT_VAULT_BACKUP_SCHEMA,
+  READ_SCREEN_SCHEMA,
+  TAP_SCREEN_SCHEMA,
 ];

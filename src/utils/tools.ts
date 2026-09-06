@@ -27,6 +27,27 @@ export const POSSIBILITIES_TOOLS: any[] = [
       required: ['url'],
     },
   },
+  {
+    name: 'read_screen',
+    description: 'Reads the active Android device screen hierarchy, visible text, clickable views, and coordinate bounds via Accessibility Service.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'tap_screen',
+    description: 'Performs an autonomous touch tap at the specified screen pixel coordinates (x, y) via Accessibility Service gestures.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        x: { type: 'NUMBER', description: 'Screen X coordinate in pixels' },
+        y: { type: 'NUMBER', description: 'Screen Y coordinate in pixels' },
+      },
+      required: ['x', 'y'],
+    },
+  },
 ];
 
 export async function executeToolCall(name: string, args: any): Promise<any> {

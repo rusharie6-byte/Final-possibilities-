@@ -4,6 +4,7 @@
 // and feeds the result back to the model or synthesizes an authentic natural response.
 
 import { getApiEndpoint, loggedFetch } from '../lib/api';
+import { possibilitiesNativeBridge } from './nativeBridge';
 
 export interface ExtractedToolCall {
   name: string;
@@ -24,7 +25,7 @@ export interface ToolExecutionResult {
  * that should be executed automatically in the background without user approval gating.
  */
 export function isReadOnlyTool(toolName: string): boolean {
-  const readTools = ['github_api', 'fetch_url', 'list_directory', 'read_file'];
+  const readTools = ['github_api', 'fetch_url', 'list_directory', 'read_file', 'read_screen'];
   return readTools.includes(toolName);
 }
 
@@ -268,7 +269,30 @@ export async function executeReadOnlyTool(
     }
   }
 
-  // 3. LOCAL TOOLS (list_directory, read_file)
+  // 3. READ SCREEN ACCESSIBILITY TOOL
+  if (toolName === 'read_screen') {
+    const res = await possibilitiesNativeBridge.readScreen();
+    if (res.success && res.screen) {
+      let parsedData: any = res.screen;
+      try {
+        parsedData = JSON.parse(res.screen);
+      } catch {
+        // use raw string
+      }
+      return {
+        success: true,
+        data: parsedData,
+        summary: `Screen accessibility inspection captured successfully.`,
+      };
+    }
+    return {
+      success: false,
+      data: { error: res.error || 'Accessibility Service not active' },
+      summary: `Failed to inspect screen: ${res.error || 'Accessibility Service not active'}`,
+    };
+  }
+
+  // 4. LOCAL TOOLS (list_directory, read_file)
   try {
     const readRes = await loggedFetch(getApiEndpoint('/api/tools/read'), {
       method: 'POST',

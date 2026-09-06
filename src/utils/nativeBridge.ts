@@ -18,9 +18,41 @@ export interface PossibilitiesNativeBridgePlugin {
   ): Promise<{ remove: () => void }>;
 }
 
+export interface AccessibilityControlPlugin {
+  checkStatus(): Promise<{ active: boolean }>;
+  readScreen(): Promise<{ screen: string }>;
+  tapScreen(options: { x: number; y: number }): Promise<{ success: boolean }>;
+}
+
 const NativeBridge = registerPlugin<PossibilitiesNativeBridgePlugin>('PossibilitiesNativeBridge');
+const AccessibilityControl = registerPlugin<AccessibilityControlPlugin>('AccessibilityControl');
 
 export const possibilitiesNativeBridge = {
+  async checkAccessibilityStatus(): Promise<{ active: boolean; error?: string }> {
+    try {
+      return await AccessibilityControl.checkStatus();
+    } catch (e: any) {
+      return { active: false, error: e?.message || 'AccessibilityControl plugin not available' };
+    }
+  },
+
+  async readScreen(): Promise<{ success: boolean; screen?: string; error?: string }> {
+    try {
+      const res = await AccessibilityControl.readScreen();
+      return { success: true, screen: res.screen };
+    } catch (e: any) {
+      return { success: false, error: e?.message || 'Failed to read screen via Accessibility Service' };
+    }
+  },
+
+  async tapScreen(x: number, y: number): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await AccessibilityControl.tapScreen({ x, y });
+      return { success: res.success };
+    } catch (e: any) {
+      return { success: false, error: e?.message || 'Failed to dispatch tap gesture' };
+    }
+  },
   async requestMicrophonePermission(): Promise<{ granted: boolean; error?: string }> {
     try {
       if (typeof navigator !== 'undefined' && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
