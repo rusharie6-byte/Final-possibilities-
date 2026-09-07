@@ -38,6 +38,29 @@ jobs:
       - name: Sync Capacitor
         run: npx cap sync android
 
+      - name: Ensure Gradle Wrapper
+        run: |
+          mkdir -p android/gradle/wrapper
+          if [ -f "android/gradle/wrapper/gradle-wrapper.jar.b64" ]; then
+            echo "Restoring gradle-wrapper.jar from committed base64..."
+            base64 -d android/gradle/wrapper/gradle-wrapper.jar.b64 > android/gradle/wrapper/gradle-wrapper.jar
+          fi
+          if [ ! -s "android/gradle/wrapper/gradle-wrapper.jar" ]; then
+            echo "Fetching gradle-wrapper.jar from official Gradle repository..."
+            curl -sLo android/gradle/wrapper/gradle-wrapper.jar https://raw.githubusercontent.com/gradle/gradle/v8.14.3/gradle/wrapper/gradle-wrapper.jar
+          fi
+
+      - name: Ensure Fixed Signing Keystore
+        run: |
+          mkdir -p android/app
+          if [ -f "android/app/keystore.b64" ]; then
+            echo "Decoding committed fixed signing keystore..."
+            base64 -d android/app/keystore.b64 > android/app/debug.keystore
+          elif [ ! -f "android/app/debug.keystore" ]; then
+            echo "Generating fallback debug.keystore..."
+            keytool -genkey -v -keystore android/app/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Possibilities, OU=Development, O=Possibilities, L=City, S=State, C=US"
+          fi
+
       - name: Make Gradle Executable
         run: chmod +x android/gradlew
 

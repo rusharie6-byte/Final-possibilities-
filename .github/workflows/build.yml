@@ -36,9 +36,17 @@ jobs:
           npx cap add android || true
           npx cap sync android
 
-      - name: Ensure Fixed Signing Keystore
+      - name: Ensure Fixed Signing Keystore & Wrapper
         run: |
-          mkdir -p android/app
+          mkdir -p android/app android/gradle/wrapper
+          if [ -f "android/gradle/wrapper/gradle-wrapper.jar.b64" ]; then
+            echo "Restoring gradle-wrapper.jar from committed base64..."
+            base64 -d android/gradle/wrapper/gradle-wrapper.jar.b64 > android/gradle/wrapper/gradle-wrapper.jar
+          fi
+          if [ ! -s "android/gradle/wrapper/gradle-wrapper.jar" ]; then
+            echo "Fetching gradle-wrapper.jar from official Gradle repository..."
+            curl -sLo android/gradle/wrapper/gradle-wrapper.jar https://raw.githubusercontent.com/gradle/gradle/v8.14.3/gradle/wrapper/gradle-wrapper.jar
+          fi
           if [ -f "android/app/keystore.b64" ]; then
             echo "Decoding committed fixed signing keystore..."
             base64 -d android/app/keystore.b64 > android/app/debug.keystore
