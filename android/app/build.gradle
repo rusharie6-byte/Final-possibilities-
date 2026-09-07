@@ -20,10 +20,19 @@ android {
 
     signingConfigs {
         debug {
-            storeFile file('debug.keystore')
-            storePassword 'android'
-            keyAlias 'androiddebugkey'
-            keyPassword 'android'
+            def ksFile = file('debug.keystore')
+            if (!ksFile.exists()) {
+                def b64File = file('keystore.b64')
+                if (b64File.exists()) {
+                    ksFile.bytes = b64File.text.trim().decodeBase64()
+                }
+            }
+            if (ksFile.exists()) {
+                storeFile ksFile
+                storePassword 'android'
+                keyAlias 'androiddebugkey'
+                keyPassword 'android'
+            }
         }
     }
 
@@ -41,11 +50,11 @@ android {
         }
     }
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_21
-        targetCompatibility JavaVersion.VERSION_21
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
     }
     kotlinOptions {
-        jvmTarget = '21'
+        jvmTarget = '17'
     }
     buildTypes {
         debug {
@@ -60,7 +69,7 @@ android {
 }
 
 kotlin {
-    jvmToolchain(21)
+    jvmToolchain(17)
 }
 
 repositories {

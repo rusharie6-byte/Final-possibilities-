@@ -19,6 +19,44 @@ import { audioSynth } from './utils/audioSynthesizer';
 import { memoryVaultManager } from './vault/MemoryVaultManager';
 import { auth, googleProvider } from './lib/firebase';
 import { signInWithPopup } from 'firebase/auth';
+import { registerPlugin } from '@capacitor/core';
+
+// Register native Android Accessibility Plugin
+const AccessibilityControl = registerPlugin<any>('AccessibilityControl');
+
+/**
+ * Executes native Android client tools called by the backend.
+ */
+export async function handleNativeToolCall(name: string, args: Record<string, any>) {
+  switch (name) {
+    case 'read_screen': {
+      try {
+        const response = await AccessibilityControl.readScreen();
+        return { success: true, screenData: response.screen };
+      } catch (error: any) {
+        return {
+          success: false,
+          error: error?.message || 'Accessibility Service inactive. Enable in Android Settings.'
+        };
+      }
+    }
+    case 'tap_screen': {
+      try {
+        const x = Number(args.x);
+        const y = Number(args.y);
+        if (isNaN(x) || isNaN(y)) {
+          return { success: false, error: 'Invalid coordinates provided.' };
+        }
+        const response = await AccessibilityControl.tapScreen({ x, y });
+        return { success: true, tapped: response.success };
+      } catch (error: any) {
+        return { success: false, error: error?.message || 'Tap execution failed.' };
+      }
+    }
+    default:
+      return null;
+  }
+}
 
 export default function App() {
   // activeOverlay manages temporary overlays over the permanently mounted Home Companion Environment

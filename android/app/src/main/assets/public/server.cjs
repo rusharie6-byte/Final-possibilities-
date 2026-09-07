@@ -62,7 +62,7 @@ var POSSIBILITIES_TOOLS = [
   },
   {
     name: "read_screen",
-    description: "Reads the active Android device screen hierarchy, visible text, clickable views, and coordinate bounds via Accessibility Service.",
+    description: "Inspect active Android screen UI text, view IDs, and bounding coordinates via Accessibility Service.",
     parameters: {
       type: "OBJECT",
       properties: {},
@@ -71,12 +71,12 @@ var POSSIBILITIES_TOOLS = [
   },
   {
     name: "tap_screen",
-    description: "Performs an autonomous touch tap at the specified screen pixel coordinates (x, y) via Accessibility Service gestures.",
+    description: "Simulate a tap gesture at exact X, Y screen coordinates in any active Android app.",
     parameters: {
       type: "OBJECT",
       properties: {
-        x: { type: "NUMBER", description: "Screen X coordinate in pixels" },
-        y: { type: "NUMBER", description: "Screen Y coordinate in pixels" }
+        x: { type: "NUMBER", description: "Screen X pixel coordinate" },
+        y: { type: "NUMBER", description: "Screen Y pixel coordinate" }
       },
       required: ["x", "y"]
     }
