@@ -187,7 +187,7 @@ function formatToolResultText(toolName: string, output: any): string {
 // Resilient Gemini Model Retry Wrapper with Valid Production Models
 async function callGeminiWithRetry(
   callFn: (modelName: string) => Promise<any>,
-  models: string[] = ["gemini-2.5-flash"],
+  models: string[] = ["gemini-3.8-flash", "gemini-2.5-flash"],
   maxRetriesPerModel: number = 2
 ): Promise<any> {
   let lastErr: any = null;
@@ -677,7 +677,7 @@ app.get("/api/health", async (req, res) => {
     try {
       const ai = new GoogleGenAI({ apiKey });
       const testRes = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-3.8-flash",
         contents: "ping",
         config: { maxOutputTokens: 5 }
       });

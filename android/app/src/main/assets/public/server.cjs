@@ -341,7 +341,7 @@ ${output.content}
   }
   return typeof output === "string" ? output : JSON.stringify(output, null, 2);
 }
-async function callGeminiWithRetry(callFn, models = ["gemini-2.5-flash"], maxRetriesPerModel = 2) {
+async function callGeminiWithRetry(callFn, models = ["gemini-3.8-flash", "gemini-2.5-flash"], maxRetriesPerModel = 2) {
   let lastErr = null;
   for (const model of models) {
     for (let attempt = 0; attempt <= maxRetriesPerModel; attempt++) {
@@ -740,7 +740,7 @@ app.get("/api/health", async (req, res) => {
     try {
       const ai = new import_genai.GoogleGenAI({ apiKey });
       const testRes = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-3.8-flash",
         contents: "ping",
         config: { maxOutputTokens: 5 }
       });
