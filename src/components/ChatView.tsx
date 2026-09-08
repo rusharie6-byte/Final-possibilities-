@@ -334,7 +334,11 @@ export const ChatView: React.FC = () => {
           // Intercept function call from native data.functionCalls, candidates, or stringified text
           extractedCall = parseToolCall(data);
 
-          if (data.fallback || data.error === 'NO_API_KEY') {
+          if (
+            data.fallback ||
+            data.error === 'NO_API_KEY' ||
+            (typeof data.text === 'string' && data.text.includes('Cloud AI connection issue'))
+          ) {
             setOfflineNotice('Possibilities 3B Local Engine Active (Zero Tokens Consumed) | Offline Fallback');
             const local3BRes = await offline3BEngine.generateResponse(
               finalPromptText,

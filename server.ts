@@ -187,7 +187,7 @@ function formatToolResultText(toolName: string, output: any): string {
 // Resilient Gemini Model Retry Wrapper with Valid Production Models
 async function callGeminiWithRetry(
   callFn: (modelName: string) => Promise<any>,
-  models: string[] = ["gemini-3.8-flash", "gemini-2.5-flash"],
+  models: string[] = ["gemini-3.8-flash", "gemini-3.1-flash-lite"],
   maxRetriesPerModel: number = 2
 ): Promise<any> {
   let lastErr: any = null;
@@ -286,6 +286,10 @@ app.post("/api/gemini", async (req, res) => {
           if (!hasContent) continue;
 
           if (sanitized.length === 0) {
+            // Gemini API requires multi-turn history to start with a 'user' turn
+            if (item.role === 'model') {
+              sanitized.push({ role: 'user', parts: [{ text: 'Hello Possibilities.' }] });
+            }
             sanitized.push(item);
           } else {
             const prevRole = sanitized[sanitized.length - 1].role;

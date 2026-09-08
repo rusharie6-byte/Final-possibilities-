@@ -341,7 +341,7 @@ ${output.content}
   }
   return typeof output === "string" ? output : JSON.stringify(output, null, 2);
 }
-async function callGeminiWithRetry(callFn, models = ["gemini-3.8-flash", "gemini-2.5-flash"], maxRetriesPerModel = 2) {
+async function callGeminiWithRetry(callFn, models = ["gemini-3.8-flash", "gemini-3.1-flash-lite"], maxRetriesPerModel = 2) {
   let lastErr = null;
   for (const model of models) {
     for (let attempt = 0; attempt <= maxRetriesPerModel; attempt++) {
@@ -424,6 +424,9 @@ ${att.textPayload}
           const hasContent = item.parts.some((p) => p.text || p.inlineData);
           if (!hasContent) continue;
           if (sanitized.length === 0) {
+            if (item.role === "model") {
+              sanitized.push({ role: "user", parts: [{ text: "Hello Possibilities." }] });
+            }
             sanitized.push(item);
           } else {
             const prevRole = sanitized[sanitized.length - 1].role;
