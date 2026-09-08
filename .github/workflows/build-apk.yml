@@ -42,13 +42,15 @@ jobs:
         run: |
           mkdir -p android/gradle/wrapper android/app
           if [ -f "android/gradle/wrapper/gradle-wrapper.jar.b64" ]; then
-            echo "Restoring gradle-wrapper.jar from committed base64..."
+            echo "Decoding gradle-wrapper.jar from committed base64..."
             base64 -d android/gradle/wrapper/gradle-wrapper.jar.b64 > android/gradle/wrapper/gradle-wrapper.jar
           fi
-          if [ ! -s "android/gradle/wrapper/gradle-wrapper.jar" ]; then
-            echo "Fetching gradle-wrapper.jar from official Gradle repository..."
+          if ! unzip -t android/gradle/wrapper/gradle-wrapper.jar >/dev/null 2>&1; then
+            echo "Jar missing or invalid, fetching official gradle-wrapper.jar..."
             curl -sLo android/gradle/wrapper/gradle-wrapper.jar https://raw.githubusercontent.com/gradle/gradle/v8.14.3/gradle/wrapper/gradle-wrapper.jar
           fi
+          unzip -l android/gradle/wrapper/gradle-wrapper.jar | grep GradleWrapperMain || true
+
           if [ -f "android/app/keystore.b64" ]; then
             echo "Decoding committed fixed signing keystore..."
             base64 -d android/app/keystore.b64 > android/app/debug.keystore
