@@ -21,41 +21,64 @@ import { auth, googleProvider } from './lib/firebase';
 import { signInWithPopup } from 'firebase/auth';
 import { registerPlugin } from '@capacitor/core';
 
-// Register native Android Accessibility Plugin
+// Register native Android Accessibility Control Plugin
 const AccessibilityControl = registerPlugin<any>('AccessibilityControl');
 
 /**
- * Executes native Android client tools called by the backend.
+ * Handles incoming native client tool calls issued by the AI companion engine.
  */
-export async function handleNativeToolCall(name: string, args: Record<string, any>) {
-  switch (name) {
+export async function executeClientNativeTool(toolName: string, args: Record<string, any>): Promise<any> {
+  switch (toolName) {
     case 'read_screen': {
       try {
-        const response = await AccessibilityControl.readScreen();
-        return { success: true, screenData: response.screen };
-      } catch (error: any) {
+        const result = await AccessibilityControl.readScreen();
         return {
-          success: false,
-          error: error?.message || 'Accessibility Service inactive. Enable in Android Settings.'
+          status: 'success',
+          data: result.screen || 'Screen UI surface is empty or unreadable.'
+        };
+      } catch (err: any) {
+        return {
+          status: 'error',
+          message: err?.message || 'Accessibility Service inactive. Enable Possibilities in Android Accessibility Settings.'
         };
       }
     }
+
     case 'tap_screen': {
+      const x = Number(args?.x);
+      const y = Number(args?.y);
+
+      if (isNaN(x) || isNaN(y)) {
+        return {
+          status: 'error',
+          message: 'Invalid X, Y screen coordinates provided.'
+        };
+      }
+
       try {
-        const x = Number(args.x);
-        const y = Number(args.y);
-        if (isNaN(x) || isNaN(y)) {
-          return { success: false, error: 'Invalid coordinates provided.' };
-        }
-        const response = await AccessibilityControl.tapScreen({ x, y });
-        return { success: true, tapped: response.success };
-      } catch (error: any) {
-        return { success: false, error: error?.message || 'Tap execution failed.' };
+        const result = await AccessibilityControl.tapScreen({ x, y });
+        return {
+          status: 'success',
+          tapped: result.success
+        };
+      } catch (err: any) {
+        return {
+          status: 'error',
+          message: err?.message || 'Failed to dispatch tap gesture to Android OS.'
+        };
       }
     }
+
     default:
       return null;
   }
+}
+
+/**
+ * Compatibility alias for executeClientNativeTool.
+ */
+export async function handleNativeToolCall(name: string, args: Record<string, any>) {
+  return executeClientNativeTool(name, args);
 }
 
 export default function App() {

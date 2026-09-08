@@ -2,7 +2,38 @@
 import path from 'path';
 import fs from 'fs/promises';
 
-export const POSSIBILITIES_TOOLS: any[] = [
+export interface ToolDefinition {
+  name: string;
+  description: string;
+  parameters: {
+    type: string;
+    properties: Record<string, any>;
+    required: string[];
+  };
+}
+
+export const POSSIBILITIES_TOOLS: ToolDefinition[] = [
+  {
+    name: "read_screen",
+    description: "Inspect active Android screen multi-window UI text, view IDs, interactive layers, and bounding coordinates via Accessibility Service.",
+    parameters: {
+      type: "OBJECT",
+      properties: {},
+      required: []
+    }
+  },
+  {
+    name: "tap_screen",
+    description: "Simulate a precise touch gesture at target (x, y) coordinates on the active Android OS surface.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        x: { type: "NUMBER", description: "Screen X pixel coordinate" },
+        y: { type: "NUMBER", description: "Screen Y pixel coordinate" }
+      },
+      required: ["x", "y"]
+    }
+  },
   {
     name: 'github_api',
     description: 'Query GitHub REST API to list directory contents or fetch raw file sources.',
@@ -26,28 +57,7 @@ export const POSSIBILITIES_TOOLS: any[] = [
       },
       required: ['url'],
     },
-  },
-  {
-    name: "read_screen",
-    description: "Inspect active Android screen UI text, view IDs, and bounding coordinates via Accessibility Service.",
-    parameters: {
-      type: "OBJECT",
-      properties: {},
-      required: []
-    }
-  },
-  {
-    name: "tap_screen",
-    description: "Simulate a tap gesture at exact X, Y screen coordinates in any active Android app.",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        x: { type: "NUMBER", description: "Screen X pixel coordinate" },
-        y: { type: "NUMBER", description: "Screen Y pixel coordinate" }
-      },
-      required: ["x", "y"]
-    }
-  },
+  }
 ];
 
 export async function executeToolCall(name: string, args: any): Promise<any> {

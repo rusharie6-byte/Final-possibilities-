@@ -16,7 +16,7 @@ class MainActivity : BridgeActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         registerPlugin(PossibilitiesNativeBridge::class.java)
-        registerPlugin(AccessibilityPlugin::class.java)
+        registerPlugin(AccessibilityControlPlugin::class.java)
         super.onCreate(savedInstanceState)
 
         // Check startup permissions for Mic, Media, and Storage

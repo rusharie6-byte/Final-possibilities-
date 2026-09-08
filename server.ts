@@ -451,7 +451,7 @@ app.post("/api/chat", async (req, res) => {
         model: modelName,
         contents: conversationContents,
         config: {
-          tools: [{ functionDeclarations: POSSIBILITIES_TOOLS }],
+          tools: [{ functionDeclarations: POSSIBILITIES_TOOLS as any }],
         },
       })
     );
@@ -492,7 +492,7 @@ app.post("/api/chat", async (req, res) => {
             model: modelName,
             contents: conversationContents,
             config: {
-              tools: [{ functionDeclarations: POSSIBILITIES_TOOLS }],
+              tools: [{ functionDeclarations: POSSIBILITIES_TOOLS as any }],
             },
           })
         );
