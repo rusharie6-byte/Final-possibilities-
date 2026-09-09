@@ -157,6 +157,14 @@ function formatToolResultText(toolName: string, output: any): string {
   }
 
   if (toolName === "github_api") {
+    if (output.type === "commits" && Array.isArray(output.commits)) {
+      const commitList = output.commits.map((c: any) => `• \`${c.sha}\` - **${c.message}** (${c.author}, ${c.date ? new Date(c.date).toLocaleDateString() : 'recent'})`).join("\n");
+      return `Latest commits in \`${output.repository}\`:\n\n${commitList}`;
+    }
+    if (output.type === "workflow_runs" && Array.isArray(output.runs)) {
+      const runList = output.runs.map((r: any) => `• **${r.name}** [${r.status}/${r.conclusion || 'pending'}] - commit: "${r.commit || 'push'}"`).join("\n");
+      return `Recent GitHub Action workflow runs for \`${output.repository}\`:\n\n${runList}`;
+    }
     if (output.type === "directory" && Array.isArray(output.files)) {
       const fileList = output.files.map((item: any) => `• ${item.type === "dir" || item.type === "directory" ? "📁" : "📄"} **${item.name}**`).join("\n");
       return `Repository directory contents (${output.path || "root"}):\n\n${fileList}\n\nTotal: ${output.files.length} items.`;
@@ -184,17 +192,21 @@ function formatToolResultText(toolName: string, output: any): string {
   return typeof output === "string" ? output : JSON.stringify(output, null, 2);
 }
 
-// Resilient Gemini Model Retry Wrapper with Valid Production Models
+// Resilient Gemini Model Retry Wrapper with Strict Timeout and Fast Failover
 async function callGeminiWithRetry(
   callFn: (modelName: string) => Promise<any>,
   models: string[] = ["gemini-3.8-flash", "gemini-3.1-flash-lite"],
-  maxRetriesPerModel: number = 2
+  maxRetriesPerModel: number = 1
 ): Promise<any> {
   let lastErr: any = null;
   for (const model of models) {
     for (let attempt = 0; attempt <= maxRetriesPerModel; attempt++) {
       try {
-        const res = await callFn(model);
+        // Enforce 25s per-attempt timeout to guarantee backend never exceeds proxy threshold
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error(`Model ${model} request timed out after 25 seconds.`)), 25000)
+        );
+        const res = await Promise.race([callFn(model), timeoutPromise]);
         if (res) return res;
       } catch (err: any) {
         lastErr = err;
@@ -207,15 +219,14 @@ async function callGeminiWithRetry(
           msg.includes('Service Unavailable') ||
           msg.includes('ResourceExhausted') ||
           msg.includes('ECONNRESET') ||
-          msg.includes('ETIMEDOUT');
+          msg.includes('timed out');
 
         console.warn(`[Gemini Attempt] Model ${model} (attempt ${attempt + 1}/${maxRetriesPerModel + 1}) failed: ${msg}`);
         if (isTransient && attempt < maxRetriesPerModel) {
-          const delay = (attempt + 1) * 1000 + Math.floor(Math.random() * 500);
-          await new Promise((resolve) => setTimeout(resolve, delay));
+          await new Promise((resolve) => setTimeout(resolve, 800));
           continue;
         }
-        break; // Try next candidate model
+        break; // Fast failover to next model
       }
     }
   }
@@ -365,10 +376,17 @@ app.post("/api/gemini", async (req, res) => {
 
       const updatedContents = Array.isArray(contents) ? [...contents] : [{ role: 'user', parts: contents }];
       
-      const modelParts = currentResponse.candidates?.[0]?.content?.parts || [];
-      updatedContents.push({ role: 'model', parts: modelParts });
-      // Correctly append Function Response with 'function' role
-      updatedContents.push({ role: 'function', parts: toolResponses });
+      const modelCandidate = currentResponse.candidates?.[0];
+      if (modelCandidate?.content) {
+        updatedContents.push(modelCandidate.content);
+      } else {
+        const modelParts = currentResponse.candidates?.[0]?.content?.parts || [];
+        updatedContents.push({ role: 'model', parts: modelParts });
+      }
+
+      // In @google/genai SDK, function responses MUST use role 'user'
+      updatedContents.push({ role: 'user', parts: toolResponses });
+      contents = updatedContents;
 
       try {
         currentResponse = await callGeminiWithRetry((modelName) =>
@@ -398,8 +416,16 @@ app.post("/api/gemini", async (req, res) => {
 
     const finalFunctionCalls = currentResponse.functionCalls || currentResponse.candidates?.[0]?.content?.parts?.filter((p: any) => p.functionCall).map((p: any) => p.functionCall);
 
+    let finalResponseText = currentResponse.text || null;
+    if (!finalResponseText && currentResponse.candidates?.[0]?.content?.parts) {
+      const textParts = currentResponse.candidates[0].content.parts.filter((p: any) => p.text).map((p: any) => p.text);
+      if (textParts.length > 0) {
+        finalResponseText = textParts.join("\n");
+      }
+    }
+
     res.json({
-      text: currentResponse.text || null,
+      text: finalResponseText,
       functionCalls: finalFunctionCalls || null,
       candidates: currentResponse.candidates,
       usageMetadata: currentResponse.usageMetadata,
@@ -470,18 +496,23 @@ app.post("/api/chat", async (req, res) => {
       // Execute tool cleanly on backend
       const toolResult = await executeToolCall(toolCall.name, toolCall.args || {});
 
-      // Correctly append Model Function Call
-      conversationContents.push({
-        role: 'model',
-        parts: [{ functionCall: toolCall }],
-      });
+      // Correctly append Model candidate content
+      if (candidate?.content) {
+        conversationContents.push(candidate.content);
+      } else {
+        conversationContents.push({
+          role: 'model',
+          parts: [{ functionCall: toolCall }],
+        });
+      }
 
-      // Correctly append Function Response with 'function' role
+      // In @google/genai SDK, function responses MUST use role 'user'
       conversationContents.push({
-        role: 'function',
+        role: 'user',
         parts: [{
           functionResponse: {
             name: toolCall.name,
+            ...(toolCall.id ? { id: toolCall.id } : {}),
             response: { result: toolResult },
           },
         }],

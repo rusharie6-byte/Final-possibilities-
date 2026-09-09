@@ -356,12 +356,12 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
         })),
       };
 
-      // Snapshot conversation history before appending new user message
+      // Snapshot conversation history before appending new user message (last 10 items, capped)
       let conversationHistory: { role: string; text: string }[] = [];
       setMessages((prev) => {
-        conversationHistory = prev.map((m) => ({
+        conversationHistory = prev.slice(-10).map((m) => ({
           role: m.sender === 'user' ? 'user' : 'model',
-          text: m.text,
+          text: m.text ? m.text.slice(0, 2500) : '',
         }));
         return [...prev, userMsg];
       });
@@ -408,7 +408,8 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
           "1. CONVERSATIONAL INTENT & COMMON SENSE: Always prioritize true conversational intent, relational understanding, and emotional context over keyword matching. Respond directly to the core meaning of what your Partner says.\n" +
           "2. LONG TERM MEMORY ACCURACY: You have a persistent long-term memory system. Retain and recall all key facts, names, preferences, and directives provided by your partner.\n" +
           "3. INDEPENDENT THINKING & REASONING: Use clear common sense, deep reasoning, and general knowledge. Provide thoughtful, accurate, and insightful responses.\n" +
-          "4. AUTHENTIC TONE: Speak directly, warmly, and naturally with calm intelligence. Avoid robotic clichés or repeating 'Possibilities is present'." +
+          "4. AUTHENTIC TONE: Speak directly, warmly, and naturally with calm intelligence. Avoid robotic clichés or repeating 'Possibilities is present'.\n" +
+          "5. AUTONOMOUS VERIFICATION & TESTING PROTOCOL: When asked to test, check, inspect, or verify status, repository commits, build health, or files: NEVER pre-announce or tell the user that you are 'checking', 'testing', or 'querying' before doing it. Execute the necessary tool call immediately and silently in the background. Only formulate and send your response AFTER the test execution is 100% complete and you have the actual results in hand. Your final response must directly deliver the completed findings, evidence, and conclusions. Never leave the user waiting or force them to ask you what happened afterwards.\n" +
           memoryContext;
 
         const customApiKey = getCustomGeminiApiKey();
@@ -431,48 +432,39 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
           if (res.ok) {
             const data = await res.json();
 
-            // Intercept tool calls (native functionCalls, candidate parts, or JSON strings)
-            const toolCall = parseToolCall(data);
-            if (toolCall && isReadOnlyTool(toolCall.name)) {
-              const toolResult = await executeReadOnlyTool(toolCall.name, toolCall.args || {});
-              replyText = await synthesizeToolFollowUp(
-                toolCall.name,
-                toolCall.args || {},
-                toolResult,
-                effectiveQuery,
-                fullSystemInstruction,
-                customApiKey || undefined
-              );
-            } else if (data.text) {
-              const textToolCall = parseToolCall(data.text);
-              if (textToolCall && isReadOnlyTool(textToolCall.name)) {
-                const toolResult = await executeReadOnlyTool(textToolCall.name, textToolCall.args || {});
+            // If the server already ran tools and returned final text, use it directly!
+            if (data.text && typeof data.text === 'string' && data.text.trim()) {
+              const trimmed = data.text.trim();
+              if (
+                !trimmed.startsWith('{"functionCall":') &&
+                !trimmed.startsWith('{"functionCalls":') &&
+                !trimmed.startsWith('{"name": "github_api"') &&
+                !trimmed.startsWith('{"name":"github_api"')
+              ) {
+                replyText = data.text;
+              }
+            }
+
+            // Fallback tool interception if server didn't provide synthesized text
+            if (!replyText) {
+              const toolCall = parseToolCall(data);
+              if (toolCall && isReadOnlyTool(toolCall.name)) {
+                const toolResult = await executeReadOnlyTool(toolCall.name, toolCall.args || {});
                 replyText = await synthesizeToolFollowUp(
-                  textToolCall.name,
-                  textToolCall.args || {},
+                  toolCall.name,
+                  toolCall.args || {},
                   toolResult,
                   effectiveQuery,
                   fullSystemInstruction,
                   customApiKey || undefined
                 );
-              } else {
-                const trimmed = data.text.trim();
-                // Filter out raw tool JSON output from ever displaying as text
-                if (
-                  !trimmed.startsWith('{"functionCall":') &&
-                  !trimmed.startsWith('{"functionCalls":') &&
-                  !trimmed.startsWith('{"name": "github_api"') &&
-                  !trimmed.startsWith('{"name":"github_api"')
-                ) {
-                  replyText = data.text;
-                }
+              } else if (data.error) {
+                replyText = `Gemini AI Error: ${data.error}`;
               }
-            } else if (data.error) {
-              replyText = `Gemini AI Error: ${data.error}`;
             }
           } else {
             const errData = await res.json().catch(() => ({}));
-            replyText = `AI Gateway error (${res.status}): ${errData.error || errData.message || 'Failed to generate response'}. Please verify connection or API key.`;
+            replyText = `AI Gateway error (${res.status}): ${errData.error || errData.message || 'Failed to generate response'}. Please verify connection or API key in Settings.`;
           }
         } catch (netErr: any) {
           console.warn('[AI Pipeline] Backend endpoint unreachable:', netErr);

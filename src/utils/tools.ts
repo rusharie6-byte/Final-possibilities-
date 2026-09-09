@@ -68,7 +68,19 @@ export async function executeToolCall(name: string, args: any): Promise<any> {
       const rawPath = String(args?.path || '').trim();
       const cleanPath = rawPath.replace(/^\//, '');
       const queryRef = args?.ref ? `?ref=${encodeURIComponent(args.ref)}` : '';
-      const url = `https://api.github.com/repos/${owner}/${repo}/contents${cleanPath ? `/${cleanPath}` : ''}${queryRef}`;
+
+      let url = '';
+      if (cleanPath === 'commits' || cleanPath.startsWith('commits')) {
+        url = `https://api.github.com/repos/${owner}/${repo}/commits${queryRef || '?per_page=5'}`;
+      } else if (cleanPath === 'actions' || cleanPath.startsWith('actions') || cleanPath === 'runs') {
+        url = `https://api.github.com/repos/${owner}/${repo}/actions/runs?per_page=5`;
+      } else if (cleanPath === 'branches') {
+        url = `https://api.github.com/repos/${owner}/${repo}/branches`;
+      } else if (cleanPath === 'releases') {
+        url = `https://api.github.com/repos/${owner}/${repo}/releases`;
+      } else {
+        url = `https://api.github.com/repos/${owner}/${repo}/contents${cleanPath ? `/${cleanPath}` : ''}${queryRef}`;
+      }
 
       const headers: Record<string, string> = {
         'User-Agent': 'Possibilities-Companion-App',
@@ -78,7 +90,10 @@ export async function executeToolCall(name: string, args: any): Promise<any> {
         headers['Authorization'] = `Bearer ${process.env.GITHUB_TOKEN}`;
       }
 
-      const response = await fetch(url, { headers });
+      const response = await fetch(url, { 
+        headers,
+        signal: AbortSignal.timeout(8000),
+      });
 
       if (!response.ok) {
         const errJson = await response.json().catch(() => ({}));
@@ -91,6 +106,40 @@ export async function executeToolCall(name: string, args: any): Promise<any> {
       }
 
       const data: any = await response.json();
+
+      // If querying commits, return clean formatted summary
+      if (cleanPath === 'commits' || cleanPath.startsWith('commits')) {
+        const commits = Array.isArray(data) ? data : data.commits || [];
+        return {
+          type: 'commits',
+          repository: `${owner}/${repo}`,
+          total: commits.length,
+          commits: commits.slice(0, 5).map((c: any) => ({
+            sha: c.sha?.substring(0, 7),
+            message: c.commit?.message?.split('\n')[0],
+            author: c.commit?.author?.name || c.author?.login,
+            date: c.commit?.author?.date,
+          })),
+        };
+      }
+
+      // If querying workflow runs
+      if (cleanPath === 'actions' || cleanPath.startsWith('actions') || cleanPath === 'runs') {
+        const runs = data.workflow_runs || (Array.isArray(data) ? data : []);
+        return {
+          type: 'workflow_runs',
+          repository: `${owner}/${repo}`,
+          total: runs.length,
+          runs: runs.slice(0, 5).map((r: any) => ({
+            id: r.id,
+            name: r.name,
+            status: r.status,
+            conclusion: r.conclusion,
+            commit: r.head_commit?.message?.split('\n')[0],
+            created: r.created_at,
+          })),
+        };
+      }
 
       // If it's a file, decode base64 content if present
       if (!Array.isArray(data) && data.content && data.encoding === 'base64') {
@@ -127,6 +176,7 @@ export async function executeToolCall(name: string, args: any): Promise<any> {
       const targetUrl = String(args?.url || '').trim();
       const response = await fetch(targetUrl, {
         headers: { 'User-Agent': 'Possibilities-Companion-App' },
+        signal: AbortSignal.timeout(8000),
       });
       if (!response.ok) return { error: `Fetch failed with status ${response.status}`, status: response.status };
       const text = await response.text();

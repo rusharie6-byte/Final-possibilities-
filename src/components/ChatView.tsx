@@ -295,6 +295,7 @@ export const ChatView: React.FC = () => {
         "2. INDEPENDENT THINKING & REASONING: Use clear common sense, deep reasoning, and general knowledge. Think for yourself and provide thoughtful, accurate, and insightful responses to any question, attachment, image, video, document, or link.\n" +
         "3. AUTHENTIC TONE: Speak directly, warmly, and naturally with calm intelligence. Avoid robotic clichés, formal status announcements, or canned greetings. Never use emotional apologies like 'I'm sorry'; respond with intellectual honesty and clarity.\n" +
         "4. SELF-CODEBASE INSPECTION & DIAGNOSTICS: When asked to inspect your code, check bugs, or see what needs fixing, thoroughly analyze your attached raw source code files (`companionEngine.ts`, `memoryStore.ts`, `storageEngine.ts`, `ChatView.tsx`, `server.ts`). Provide concise, direct technical feedback and exact fix instructions so your Creator can pass them to the build agent.\n" +
+        "5. AUTONOMOUS VERIFICATION & TESTING PROTOCOL: When asked to test, check, inspect, or verify status, repository commits, build health, or files: NEVER pre-announce or tell the user that you are 'checking', 'testing', or 'querying' before doing it. Execute the necessary tool call immediately and silently in the background. Only formulate and send your response AFTER the test execution is 100% complete and you have the actual results in hand. Your final response must directly deliver the completed findings, evidence, and conclusions. Never leave the user waiting or force them to ask you what happened afterwards.\n" +
         promptContext;
 
       const customApiKey = getCustomGeminiApiKey();
@@ -312,9 +313,10 @@ export const ChatView: React.FC = () => {
             prompt: finalPromptText,
             systemInstruction: systemInstructionText,
             customApiKey: customApiKey || undefined,
-            history: messages.map((m) => ({
+            // Send lean bounded history (last 10 messages, capped at 2500 chars) to prevent latency/timeouts
+            history: messages.slice(-10).map((m) => ({
               role: m.sender === 'user' ? 'user' : 'model',
-              text: m.text,
+              text: m.text ? m.text.slice(0, 2500) : '',
             })),
             attachments: activeAttachments.map((a) => ({
               name: a.name,
@@ -331,23 +333,25 @@ export const ChatView: React.FC = () => {
           // Intercept function call from native data.functionCalls, candidates, or stringified text
           extractedCall = parseToolCall(data);
 
+          // If the server already ran tools and synthesized the final text, use it directly!
+          if (data.text && typeof data.text === 'string' && data.text.trim()) {
+            const trimmed = data.text.trim();
+            if (
+              !trimmed.startsWith('{"functionCall":') &&
+              !trimmed.startsWith('{"functionCalls":') &&
+              !trimmed.startsWith('{"name": "github_api"') &&
+              !trimmed.startsWith('{"name":"github_api"')
+            ) {
+              replyText = data.text;
+            }
+          }
+
+          // Handle mutative/approval actions if present
           if (extractedCall) {
             const fc = extractedCall;
 
-            // A. READ-ONLY TOOLS (Auto-execute in background: github_api, fetch_url, list_directory, read_file)
-            if (isReadOnlyTool(fc.name)) {
-              const toolResult = await executeReadOnlyTool(fc.name, fc.args || {});
-              replyText = await synthesizeToolFollowUp(
-                fc.name,
-                fc.args || {},
-                toolResult,
-                finalPromptText,
-                systemInstructionText,
-                customApiKey || undefined
-              );
-            }
-            // B. MUTATIVE / WRITE TOOLS (Trigger Creator Approval Gate Modal)
-            else if (fc.name === 'propose_file_change' || fc.name === 'propose_terminal_command' || fc.name === 'propose_file_write') {
+            // MUTATIVE / WRITE TOOLS (Trigger Creator Approval Gate Modal)
+            if (fc.name === 'propose_file_change' || fc.name === 'propose_terminal_command' || fc.name === 'propose_file_write') {
               setActiveProposal({
                 toolName: fc.name,
                 args: {
@@ -359,37 +363,17 @@ export const ChatView: React.FC = () => {
               });
               setIsSending(false);
               return; // STOP EXECUTION HERE - Approval Gate modal handles output
-            } else {
-              setActiveProposal({
-                toolName: fc.name,
-                args: fc.args || {},
-              });
-              setIsSending(false);
-              return;
-            }
-          } else if (data.text) {
-            // Check if string text contains raw unexecuted tool call JSON
-            const textToolCall = parseToolCall(data.text);
-            if (textToolCall && isReadOnlyTool(textToolCall.name)) {
-              const toolResult = await executeReadOnlyTool(textToolCall.name, textToolCall.args || {});
+            } else if (!replyText && isReadOnlyTool(fc.name)) {
+              // Fallback client-side read-only tool synthesis only if server didn't provide text
+              const toolResult = await executeReadOnlyTool(fc.name, fc.args || {});
               replyText = await synthesizeToolFollowUp(
-                textToolCall.name,
-                textToolCall.args || {},
+                fc.name,
+                fc.args || {},
                 toolResult,
                 finalPromptText,
                 systemInstructionText,
                 customApiKey || undefined
               );
-            } else {
-              const trimmed = data.text.trim();
-              if (
-                !trimmed.startsWith('{"functionCall":') &&
-                !trimmed.startsWith('{"functionCalls":') &&
-                !trimmed.startsWith('{"name": "github_api"') &&
-                !trimmed.startsWith('{"name":"github_api"')
-              ) {
-                replyText = data.text;
-              }
             }
           } else if (data.error) {
             replyText = `Gemini AI Error: ${data.error}`;
