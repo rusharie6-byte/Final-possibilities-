@@ -4,7 +4,6 @@ import { Sparkles, Cpu, Network, Zap, Send, RefreshCw, Layers } from 'lucide-rea
 import { BrainNode } from '../types';
 import { audioSynth } from '../utils/audioSynthesizer';
 import { getApiEndpoint, loggedFetch, getCustomGeminiApiKey } from '../lib/api';
-import { offline3BEngine } from '../utils/offline3BEngine';
 
 const INITIAL_NODES: BrainNode[] = [
   { id: '1', label: 'Core Self-Model', category: 'core', valency: 0.95, x: 0, y: 0, connections: ['2', '3', '4', '5'], isActive: true },
@@ -49,24 +48,23 @@ export const BrainView: React.FC = () => {
 
     try {
       const customApiKey = getCustomGeminiApiKey();
-      if (!customApiKey) {
-        // Run 3B Local Engine
-        const localRes = await offline3BEngine.generateResponse(`Analyze and synthesize this concept: "${query}". Provide a concise cognitive breakdown.`);
-        setSynthesisOutput(localRes.text);
-      } else {
-        const apiUrl = getApiEndpoint('/api/gemini');
-        const res = await loggedFetch(apiUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            prompt: `Analyze and synthesize this concept through the Possibilities Neural Engine: "${query}". Provide a concise, high-level cognitive breakdown with 3 core pillars.`,
-            systemInstruction: 'You are the Possibilities Neural Engine. Respond concisely, intelligently, and elegantly in a calm tone.',
-            customApiKey,
-          }),
-        });
+      const apiUrl = getApiEndpoint('/api/gemini');
+      const res = await loggedFetch(apiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: `Analyze and synthesize this concept through the Possibilities Neural Engine: "${query}". Provide a concise, high-level cognitive breakdown with 3 core pillars.`,
+          systemInstruction: 'You are the Possibilities Neural Engine. Respond concisely, intelligently, and elegantly in a calm tone.',
+          customApiKey: customApiKey || undefined,
+        }),
+      });
 
+      if (res.ok) {
         const data = await res.json();
         setSynthesisOutput(data.text || 'Synthesis complete.');
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        setSynthesisOutput(`Synthesis error: ${errData.error || errData.message || 'Failed to generate concept analysis'}`);
       }
 
       // Activate random nodes during synthesis
@@ -76,8 +74,8 @@ export const BrainView: React.FC = () => {
           valency: Math.min(1.0, Math.max(0.5, n.valency + (Math.random() * 0.2 - 0.1))),
         }))
       );
-    } catch (err) {
-      setSynthesisOutput('Neural connection pulse completed offline. Concept integrated into local 3B memory layer.');
+    } catch (err: any) {
+      setSynthesisOutput(`Connection error: ${err?.message || 'Unable to reach Gemini AI service. Check network or API key.'}`);
     } finally {
       setIsSynthesizing(false);
       setSynthesisQuery('');

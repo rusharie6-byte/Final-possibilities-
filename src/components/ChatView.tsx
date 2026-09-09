@@ -10,7 +10,6 @@ import { approvalGate } from '../utils/approvalBridge';
 import { storageEngine } from '../utils/storageEngine';
 import { sovereignScavenger } from '../utils/sovereignScavenger';
 import { masterBundleEngine } from '../utils/masterBundleEngine';
-import { offline3BEngine } from '../utils/offline3BEngine';
 import { getApiEndpoint, loggedFetch, getCustomGeminiApiKey } from '../lib/api';
 import { parseToolCall, isReadOnlyTool, executeReadOnlyTool, synthesizeToolFollowUp } from '../utils/toolBridge';
 import { AiCreationStudioModal, StudioTabType } from './AiCreationStudioModal';
@@ -41,7 +40,6 @@ export const ChatView: React.FC = () => {
   const [micNotice, setMicNotice] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [isOptionsMenuOpen, setIsOptionsMenuOpen] = useState(false);
-  const [offlineNotice, setOfflineNotice] = useState<string | null>(null);
   const [isStudioOpen, setIsStudioOpen] = useState(false);
   const [studioTab, setStudioTab] = useState<StudioTabType>('image');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -306,7 +304,6 @@ export const ChatView: React.FC = () => {
 
       // Try online backend AI Gateway first (supports server-side environment key or user settings key)
       try {
-        setOfflineNotice(customApiKey ? 'Online Gemini Mode (Using Custom Key)' : 'Possibilities Engine Active');
         const apiUrl = getApiEndpoint('/api/gemini');
         const res = await loggedFetch(apiUrl, {
           method: 'POST',
@@ -334,22 +331,7 @@ export const ChatView: React.FC = () => {
           // Intercept function call from native data.functionCalls, candidates, or stringified text
           extractedCall = parseToolCall(data);
 
-          if (
-            data.fallback ||
-            data.error === 'NO_API_KEY' ||
-            (typeof data.text === 'string' && data.text.includes('Cloud AI connection issue'))
-          ) {
-            setOfflineNotice('Possibilities 3B Local Engine Active (Zero Tokens Consumed) | Offline Fallback');
-            const local3BRes = await offline3BEngine.generateResponse(
-              finalPromptText,
-              messages.map((m) => ({
-                role: m.sender === 'user' ? 'user' : 'model',
-                text: m.text,
-              })),
-              systemInstructionText
-            );
-            replyText = local3BRes.text;
-          } else if (extractedCall) {
+          if (extractedCall) {
             const fc = extractedCall;
 
             // A. READ-ONLY TOOLS (Auto-execute in background: github_api, fetch_url, list_directory, read_file)
@@ -409,28 +391,20 @@ export const ChatView: React.FC = () => {
                 replyText = data.text;
               }
             }
+          } else if (data.error) {
+            replyText = `Gemini AI Error: ${data.error}`;
           }
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          replyText = `Gemini Gateway Error (${res.status}): ${errData.error || errData.message || 'Request failed'}. Please check your connection or verify your API key in Settings.`;
         }
-      } catch (gatewayErr) {
-        console.warn('[ChatView] Backend gateway error, executing offline 3B engine:', gatewayErr);
-      }
-
-      // Offline 3B fallback if no reply text was formed
-      if (!replyText) {
-        setOfflineNotice('Possibilities 3B Local Engine Active (Zero Tokens Consumed) | Offline');
-        const local3BRes = await offline3BEngine.generateResponse(
-          finalPromptText,
-          messages.map((m) => ({
-            role: m.sender === 'user' ? 'user' : 'model',
-            text: m.text,
-          })),
-          systemInstructionText
-        );
-        replyText = local3BRes.text;
+      } catch (gatewayErr: any) {
+        console.warn('[ChatView] Backend gateway error:', gatewayErr);
+        replyText = `Network error reaching Gemini AI: ${gatewayErr?.message || 'Connection failed'}. Please check your internet connection.`;
       }
 
       if (!replyText) {
-        replyText = 'I have integrated your input into the cognitive stream.';
+        replyText = 'No response was returned by Gemini AI. Please try sending your message again.';
       }
 
       const botMsg: ChatMessage = {
@@ -448,21 +422,16 @@ export const ChatView: React.FC = () => {
       if (voiceEnabled) {
         audioSynth.speak(replyText);
       }
-    } catch (err) {
-      console.warn('ChatView online request fallback:', err);
-      setOfflineNotice('Neural link disconnected. Operating in 100% Local Companion Engine mode.');
-      const fallbackText = companionEngine.getOfflineFallback(query);
+    } catch (err: any) {
+      console.warn('ChatView online request error:', err);
       const errorMsg: ChatMessage = {
         id: `p-err-${Date.now()}`,
         sender: 'possibilities',
-        text: fallbackText,
+        text: `Unable to connect to Gemini AI: ${err?.message || 'Network request failed'}. Please check your internet connection or verify your API key in Settings.`,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        thoughtProcess: 'Offline reasoning active -> Synthesized local memory output.',
+        thoughtProcess: 'Encountered network error while connecting to Gemini AI gateway.',
       };
       setMessages((prev) => [...prev, errorMsg]);
-      if (voiceEnabled) {
-        audioSynth.speak(fallbackText);
-      }
     } finally {
       setIsSending(false);
     }
@@ -521,48 +490,6 @@ export const ChatView: React.FC = () => {
           </button>
         </div>
       </div>
-
-      {/* Offline Status Error Banner */}
-      {offlineNotice && (
-        <div className="mb-3 p-3.5 rounded-xl bg-amber-950/40 border border-amber-500/40 text-amber-200 text-xs font-mono flex flex-col sm:flex-row items-center justify-between gap-2 shadow-lg backdrop-blur-xl shrink-0">
-          <div className="flex items-center gap-2">
-            <WifiOff className="w-4 h-4 text-amber-400 shrink-0" />
-            <span>
-              <strong>100% Offline Mode Active:</strong> Neural stream disconnected. Local Companion Engine & Memory Store are operational.
-            </span>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              onClick={() => {
-                audioSynth.playNodeClick(400);
-                setOfflineNotice(null);
-              }}
-              className="px-3 py-1 bg-amber-900/80 hover:bg-amber-800 text-amber-100 rounded-lg text-[11px] font-bold border border-amber-400/40 transition-all"
-            >
-              Proceed
-            </button>
-            <button
-              onClick={async () => {
-                audioSynth.playNodeClick(700);
-                try {
-                  const res = await loggedFetch(getApiEndpoint('/api/health'), { signal: AbortSignal.timeout(4000) });
-                  if (res.ok) {
-                    setOfflineNotice(null);
-                    audioSynth.playEnergyBloom();
-                  } else {
-                    audioSynth.triggerHaptic([30, 30]);
-                  }
-                } catch (e) {
-                  audioSynth.triggerHaptic([30, 30]);
-                }
-              }}
-              className="px-3 py-1 bg-purple-950 hover:bg-purple-900 text-purple-200 rounded-lg text-[11px] font-bold border border-purple-500/40 transition-all flex items-center gap-1"
-            >
-              <RefreshCw className="w-3 h-3 text-purple-300" /> Restore / Refresh
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* Message Stream Scroll Area */}
       <div className="flex-1 overflow-y-auto space-y-4 pr-2 custom-scrollbar my-2">

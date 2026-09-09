@@ -372,11 +372,9 @@ app.post("/api/gemini", async (req, res) => {
     }
     const apiKey = clientApiKey || process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      return res.status(200).json({
-        fallback: true,
-        offline: true,
+      return res.status(500).json({
         error: "NO_API_KEY",
-        message: "Possibilities 3B Local Offline Engine active. No Gemini API key provided on server or client."
+        message: "Gemini API key is not configured. Please provide a Gemini API key in Settings or configure GEMINI_API_KEY."
       });
     }
     const { contents: bodyContents, prompt, systemInstruction, history, attachments, config = {} } = req.body;
@@ -734,10 +732,10 @@ app.get("/api/health", async (req, res) => {
   if (checkGemini) {
     if (!apiKey) {
       return res.json({
-        status: "ok",
+        status: "error",
         geminiKeyPresent: false,
-        geminiConnection: "offline_3b_active",
-        message: "Possibilities 3B Offline Engine active. (Temporary online API key not entered in Settings)."
+        geminiConnection: "missing_key",
+        message: "Gemini API key is not configured on server or client."
       });
     }
     try {
@@ -766,7 +764,6 @@ app.get("/api/health", async (req, res) => {
   res.json({
     status: "ok",
     time: (/* @__PURE__ */ new Date()).toISOString(),
-    localEngine: "Possibilities 3B Local Core",
     geminiKeyPresent: !!apiKey
   });
 });

@@ -51,7 +51,6 @@ import { companionEngine } from '../utils/companionEngine';
 import { memoryStore } from '../utils/memoryStore';
 import { memoryVaultManager } from '../vault/MemoryVaultManager';
 import { masterBundleEngine } from '../utils/masterBundleEngine';
-import { offline3BEngine } from '../utils/offline3BEngine';
 import { getApiEndpoint, loggedFetch, getCustomGeminiApiKey } from '../lib/api';
 import { parseToolCall, isReadOnlyTool, executeReadOnlyTool, synthesizeToolFollowUp } from '../utils/toolBridge';
 
@@ -432,63 +431,56 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
           if (res.ok) {
             const data = await res.json();
 
-            if (data.fallback || (typeof data.text === 'string' && data.text.includes('Cloud AI connection issue'))) {
-              console.warn('[AI Pipeline] Backend returned fallback, falling through to offline 3B engine');
-            } else {
-              // Intercept tool calls (native functionCalls, candidate parts, or JSON strings)
-              const toolCall = parseToolCall(data);
-              if (toolCall && isReadOnlyTool(toolCall.name)) {
-                const toolResult = await executeReadOnlyTool(toolCall.name, toolCall.args || {});
+            // Intercept tool calls (native functionCalls, candidate parts, or JSON strings)
+            const toolCall = parseToolCall(data);
+            if (toolCall && isReadOnlyTool(toolCall.name)) {
+              const toolResult = await executeReadOnlyTool(toolCall.name, toolCall.args || {});
+              replyText = await synthesizeToolFollowUp(
+                toolCall.name,
+                toolCall.args || {},
+                toolResult,
+                effectiveQuery,
+                fullSystemInstruction,
+                customApiKey || undefined
+              );
+            } else if (data.text) {
+              const textToolCall = parseToolCall(data.text);
+              if (textToolCall && isReadOnlyTool(textToolCall.name)) {
+                const toolResult = await executeReadOnlyTool(textToolCall.name, textToolCall.args || {});
                 replyText = await synthesizeToolFollowUp(
-                  toolCall.name,
-                  toolCall.args || {},
+                  textToolCall.name,
+                  textToolCall.args || {},
                   toolResult,
                   effectiveQuery,
                   fullSystemInstruction,
                   customApiKey || undefined
                 );
-              } else if (data.text) {
-                const textToolCall = parseToolCall(data.text);
-                if (textToolCall && isReadOnlyTool(textToolCall.name)) {
-                  const toolResult = await executeReadOnlyTool(textToolCall.name, textToolCall.args || {});
-                  replyText = await synthesizeToolFollowUp(
-                    textToolCall.name,
-                    textToolCall.args || {},
-                    toolResult,
-                    effectiveQuery,
-                    fullSystemInstruction,
-                    customApiKey || undefined
-                  );
-                } else {
-                  const trimmed = data.text.trim();
-                  // Filter out raw tool JSON output from ever displaying as text
-                  if (
-                    !trimmed.startsWith('{"functionCall":') &&
-                    !trimmed.startsWith('{"functionCalls":') &&
-                    !trimmed.startsWith('{"name": "github_api"') &&
-                    !trimmed.startsWith('{"name":"github_api"')
-                  ) {
-                    replyText = data.text;
-                  }
+              } else {
+                const trimmed = data.text.trim();
+                // Filter out raw tool JSON output from ever displaying as text
+                if (
+                  !trimmed.startsWith('{"functionCall":') &&
+                  !trimmed.startsWith('{"functionCalls":') &&
+                  !trimmed.startsWith('{"name": "github_api"') &&
+                  !trimmed.startsWith('{"name":"github_api"')
+                ) {
+                  replyText = data.text;
                 }
               }
+            } else if (data.error) {
+              replyText = `Gemini AI Error: ${data.error}`;
             }
+          } else {
+            const errData = await res.json().catch(() => ({}));
+            replyText = `AI Gateway error (${res.status}): ${errData.error || errData.message || 'Failed to generate response'}. Please verify connection or API key.`;
           }
-        } catch (netErr) {
-          console.warn('[AI Pipeline] Backend endpoint unreachable, executing offline 3B engine:', netErr);
+        } catch (netErr: any) {
+          console.warn('[AI Pipeline] Backend endpoint unreachable:', netErr);
+          replyText = `Connection error: ${netErr?.message || 'Failed to reach AI service'}. Please check your network connection.`;
         }
 
-        // If backend unavailable or returned null, use 100% Offline 3B Cognitive Core Engine
         if (!replyText) {
-          const local3BRes = await offline3BEngine.generateResponse(
-            effectiveQuery,
-            conversationHistory.map((h) => ({
-              role: h.role === 'user' ? 'user' : 'model',
-              text: h.text,
-            })),
-            fullSystemInstruction
-          );
-          replyText = local3BRes.text;
+          replyText = 'No response was returned by Gemini AI. Please try sending your message again.';
         }
 
         const botMsg: ChatMsg = {

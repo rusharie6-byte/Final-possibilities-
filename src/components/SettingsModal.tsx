@@ -375,14 +375,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                 </div>
               </div>
 
-              {/* Possibilities 3B Offline Engine & Optional Online API Key Section */}
+              {/* Google Gemini Cloud AI Configuration */}
               <div className="p-4 rounded-2xl bg-purple-950/20 border border-purple-500/30 flex flex-col gap-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <Key className="w-5 h-5 text-purple-400" />
                     <div>
-                      <div className="font-bold text-white">Engine Priority & Optional API Key</div>
-                      <div className="text-[10px] text-purple-300/60">Possibilities 3B Local Core is active first | Online API is optional second choice</div>
+                      <div className="font-bold text-white">Google Gemini Cloud AI Configuration</div>
+                      <div className="text-[10px] text-purple-300/60">Direct integration with Gemini 3.8 Flash & Gemini 3.1 Flash-Lite</div>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -391,13 +391,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                         type="button"
                         onClick={handleResetToDefault}
                         className="text-[9px] px-2 py-0.5 rounded bg-rose-950/80 hover:bg-rose-900 text-rose-300 border border-rose-500/40 font-bold uppercase transition-all shadow-[0_0_10px_rgba(244,63,94,0.3)]"
-                        title="Clear API key and return to 100% 3B Local Engine"
+                        title="Clear custom API key and use default server key"
                       >
-                        REMOVE KEY
+                        RESET TO DEFAULT
                       </button>
                     )}
                     <span className={`text-[10px] px-2.5 py-1 rounded-full uppercase font-bold ${apiKeyInput.trim() ? 'bg-indigo-900/60 text-indigo-200 border border-indigo-500/40' : 'bg-emerald-950/80 text-emerald-300 border border-emerald-500/40'}`}>
-                      {apiKeyInput.trim() ? 'TEMPORARY ONLINE KEY' : '3B LOCAL CORE (ACTIVE)'}
+                      {apiKeyInput.trim() ? 'CUSTOM API KEY' : 'SERVER KEY (DEFAULT)'}
                     </span>
                   </div>
                 </div>
@@ -405,14 +405,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                 <div className="flex flex-col gap-2.5">
                   <div className="flex flex-col gap-1">
                     <div className="flex items-center justify-between">
-                      <label className="text-[10px] text-purple-300/80 uppercase font-bold">Temporary Gemini API Key (Optional Second Choice):</label>
+                      <label className="text-[10px] text-purple-300/80 uppercase font-bold">Gemini API Key (Optional override - leave blank to use server environment):</label>
                       {apiKeyInput && (
                         <button
                           type="button"
                           onClick={() => {
                             setApiKeyInput('');
                             setCustomGeminiApiKey('');
-                            setStatusNotice('Custom API key removed. 3B Local Engine active.');
+                            setStatusNotice('Custom API key removed. Using default server key.');
                           }}
                           className="text-[9px] text-purple-400 hover:text-white underline"
                         >
@@ -425,7 +425,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                         type="password"
                         value={apiKeyInput}
                         onChange={(e) => setApiKeyInput(e.target.value)}
-                        placeholder="Leave blank for 3B Local Engine, or paste temporary AIZaSy..."
+                        placeholder="Leave blank to use server key, or paste custom AIZaSy..."
                         className="flex-1 bg-black border border-purple-500/30 rounded-xl px-3 py-2 text-xs text-white placeholder-purple-400/40 focus:outline-none focus:border-purple-400 font-sans"
                       />
                       <button
@@ -438,7 +438,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                       </button>
                     </div>
                     <span className="text-[10px] text-purple-300/70 leading-normal">
-                      🛡️ <strong>Default Behavior</strong>: The <strong>Possibilities 3B Local Engine</strong> runs active first with zero tokens and zero external API dependencies. Online mode is temporarily activated <em>only</em> if you explicitly enter an API key here.
+                      ⚡ <strong>Cloud AI Gateway</strong>: All requests are processed via the Google Gemini API (Gemini 3.8 Flash with automated failover to Gemini 3.1 Flash-Lite).
                     </span>
                   </div>
 

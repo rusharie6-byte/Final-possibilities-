@@ -35,7 +35,7 @@ export interface MasterPossibilitiesBundle {
     backend: string;
     governanceModel: string;
     approvalPipeline?: string;
-    offlineEngineStatus: string;
+    cloudAiEngineStatus: string;
     cloudVaultStatus?: string;
     internetGatewayPolicy: string;
   };
@@ -81,7 +81,7 @@ class MasterBundleEngine {
         backend: 'Local Server Proxy with /api/tools and /api/vault disk mirror',
         governanceModel: '13 Immutable Constitutional Laws with SHA-256 Startup Verification',
         approvalPipeline: 'Zero-Trust Capability-Scoped 8-Stage Sequential Verification (Signature -> Scope -> TTL -> Nonce -> Canonical Path -> Pre-State Hash -> Payload Hash -> Atomic Write)',
-        offlineEngineStatus: 'Possibilities 3B Local Cognitive Engine (Active First, Zero Tokens, 100% Offline with Optional User API Key)',
+        cloudAiEngineStatus: 'Google Gemini 3.8 Flash Cloud AI Gateway with Auto-Failover to Gemini 3.1 Flash-Lite',
         cloudVaultStatus: 'Continuous Auto-Sync & Reinstall Recovery with Firebase Firestore & AES-256-GCM Zero-Knowledge Encryption',
         internetGatewayPolicy: 'Ephemeral Session-bound, Zero Personal Egress, Inbound Documentation Scavenging',
       },
@@ -131,7 +131,7 @@ ${bundle.liveMemoryVault.coreMemories.map((m: any) => `  • [${m.category}] ${m
 - **Execution Model**: ${bundle.architectureMap.runtime}
 - **Governance**: ${bundle.architectureMap.governanceModel}
 - **Inbound Internet Gateway**: ${bundle.architectureMap.internetGatewayPolicy}
-- **Zero-Token Offline Engine**: ${bundle.architectureMap.offlineEngineStatus}
+- **Cloud AI Gateway**: ${bundle.architectureMap.cloudAiEngineStatus}
 
 ---
 *End of Master Blueprint. Fully verifiable and self-contained.*
