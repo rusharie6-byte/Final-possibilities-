@@ -414,13 +414,38 @@ app.post("/api/gemini", async (req, res) => {
       }
     }
 
-    const finalFunctionCalls = currentResponse.functionCalls || currentResponse.candidates?.[0]?.content?.parts?.filter((p: any) => p.functionCall).map((p: any) => p.functionCall);
+    let finalFunctionCalls = currentResponse.functionCalls || currentResponse.candidates?.[0]?.content?.parts?.filter((p: any) => p.functionCall).map((p: any) => p.functionCall);
 
     let finalResponseText = currentResponse.text || null;
     if (!finalResponseText && currentResponse.candidates?.[0]?.content?.parts) {
       const textParts = currentResponse.candidates[0].content.parts.filter((p: any) => p.text).map((p: any) => p.text);
       if (textParts.length > 0) {
         finalResponseText = textParts.join("\n");
+      }
+    }
+
+    // If tool calls were executed but model finished on another functionCall or null text, force text synthesis
+    if (!finalResponseText && turnCount > 0) {
+      try {
+        const forcedContents = [
+          ...contents,
+          { role: 'user', parts: [{ text: 'Please synthesize and provide your final response to the user based on the tool results above. Do not call any further tools.' }] }
+        ];
+        const synthResponse = await callGeminiWithRetry((modelName) =>
+          ai.models.generateContent({
+            model: modelName,
+            contents: forcedContents,
+            config: {
+              ...(systemInstruction ? { systemInstruction } : {}),
+            },
+          })
+        );
+        finalResponseText = synthResponse.text || synthResponse.candidates?.[0]?.content?.parts?.filter((p: any) => p.text).map((p: any) => p.text).join('\n') || null;
+        if (finalResponseText) {
+          finalFunctionCalls = null;
+        }
+      } catch (synthErr) {
+        console.warn('Final synthesis attempt failed:', synthErr);
       }
     }
 

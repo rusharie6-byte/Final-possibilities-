@@ -60,14 +60,54 @@ export const POSSIBILITIES_TOOLS: ToolDefinition[] = [
   }
 ];
 
+async function fetchGithubCommitsFromAtom(owner: string, repo: string): Promise<any> {
+  try {
+    const atomUrl = `https://github.com/${owner}/${repo}/commits.atom`;
+    const res = await fetch(atomUrl, {
+      headers: { 'User-Agent': 'Possibilities-Companion-App' },
+      signal: AbortSignal.timeout(6000),
+    });
+    if (!res.ok) return null;
+    const xml = await res.text();
+    const entries = xml.split('<entry>').slice(1);
+    if (entries.length === 0) return null;
+    const commits = entries.slice(0, 8).map((e) => {
+      const titleMatch = e.match(/<title>([\s\S]*?)<\/title>/);
+      const updatedMatch = e.match(/<updated>([\s\S]*?)<\/updated>/);
+      const authorMatch = e.match(/<name>([\s\S]*?)<\/name>/);
+      const idMatch = e.match(/<id>.*?Commit\/([a-f0-9]+)<\/id>/);
+      return {
+        sha: idMatch ? idMatch[1].substring(0, 7) : 'unknown',
+        message: titleMatch ? titleMatch[1].trim() : 'Commit update',
+        author: authorMatch ? authorMatch[1].trim() : 'author',
+        date: updatedMatch ? updatedMatch[1].trim() : new Date().toISOString(),
+      };
+    });
+    return {
+      type: 'commits',
+      repository: `${owner}/${repo}`,
+      total: commits.length,
+      commits,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function executeToolCall(name: string, args: any): Promise<any> {
   try {
     if (name === 'github_api') {
       const owner = String(args?.owner || 'rusharie6-byte').trim();
-      const repo = String(args?.repo || 'Final-possibilities-').trim();
+      const repo = String(args?.repo || 'Final-possibilities-').trim().replace(/\.git$/, '');
       const rawPath = String(args?.path || '').trim();
       const cleanPath = rawPath.replace(/^\//, '');
       const queryRef = args?.ref ? `?ref=${encodeURIComponent(args.ref)}` : '';
+
+      // Direct fast-path for commit queries: Atom feed is immune to rate-limiting
+      if (cleanPath === 'commits' || cleanPath.startsWith('commits')) {
+        const atomResult = await fetchGithubCommitsFromAtom(owner, repo);
+        if (atomResult) return atomResult;
+      }
 
       let url = '';
       if (cleanPath === 'commits' || cleanPath.startsWith('commits')) {
@@ -90,18 +130,49 @@ export async function executeToolCall(name: string, args: any): Promise<any> {
         headers['Authorization'] = `Bearer ${process.env.GITHUB_TOKEN}`;
       }
 
-      const response = await fetch(url, { 
-        headers,
-        signal: AbortSignal.timeout(8000),
-      });
+      let response: Response | null = null;
+      try {
+        response = await fetch(url, { 
+          headers,
+          signal: AbortSignal.timeout(6000),
+        });
+      } catch (netErr: any) {
+        // Fallback on network/timeout
+        const atomResult = await fetchGithubCommitsFromAtom(owner, repo);
+        if (atomResult) return atomResult;
+      }
 
-      if (!response.ok) {
-        const errJson = await response.json().catch(() => ({}));
+      if (!response || !response.ok) {
+        // Rate-limit or access failover: try atom feed for commits, or raw github for files
+        const atomResult = await fetchGithubCommitsFromAtom(owner, repo);
+        if (atomResult) return atomResult;
+
+        if (cleanPath && (cleanPath.includes('.') || !cleanPath.includes('/'))) {
+          try {
+            const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/HEAD/${cleanPath}`;
+            const rawRes = await fetch(rawUrl, { signal: AbortSignal.timeout(6000) });
+            if (rawRes.ok) {
+              const rawText = await rawRes.text();
+              return {
+                path: cleanPath,
+                name: cleanPath.split('/').pop() || cleanPath,
+                type: 'file',
+                size: rawText.length,
+                content: rawText.substring(0, 15000),
+                truncated: rawText.length > 15000,
+              };
+            }
+          } catch {
+            // continue to error payload
+          }
+        }
+
+        const errJson = response ? await response.json().catch(() => ({})) : {};
         return {
-          error: `GitHub API returned HTTP ${response.status}: ${response.statusText}`,
-          status: response.status,
+          error: `GitHub API returned HTTP ${response?.status || 500}: ${response?.statusText || 'Error'}`,
+          status: response?.status || 500,
           url,
-          details: errJson?.message || 'Resource not found or restricted.',
+          details: errJson?.message || 'Rate limit or resource error.',
         };
       }
 
@@ -114,7 +185,7 @@ export async function executeToolCall(name: string, args: any): Promise<any> {
           type: 'commits',
           repository: `${owner}/${repo}`,
           total: commits.length,
-          commits: commits.slice(0, 5).map((c: any) => ({
+          commits: commits.slice(0, 8).map((c: any) => ({
             sha: c.sha?.substring(0, 7),
             message: c.commit?.message?.split('\n')[0],
             author: c.commit?.author?.name || c.author?.login,
@@ -174,6 +245,26 @@ export async function executeToolCall(name: string, args: any): Promise<any> {
 
     if (name === 'fetch_url') {
       const targetUrl = String(args?.url || '').trim();
+
+      // If fetching a GitHub URL, automatically parse commits or clean content without HTML bloat
+      if (targetUrl.includes('github.com/')) {
+        const ghMatch = targetUrl.match(/github\.com\/([^/]+)\/([^/#?]+)/);
+        if (ghMatch) {
+          const owner = ghMatch[1];
+          const repo = ghMatch[2].replace(/\.git$/, '');
+          const commits = await fetchGithubCommitsFromAtom(owner, repo);
+          if (commits && commits.commits?.length > 0) {
+            const commitSummary = commits.commits
+              .map((c: any) => `• \`${c.sha}\` - **${c.message}** (${c.author}, ${c.date})`)
+              .join('\n');
+            return {
+              url: targetUrl,
+              content: `GitHub Repository: ${owner}/${repo}\n\nLatest Commits:\n${commitSummary}`,
+            };
+          }
+        }
+      }
+
       const response = await fetch(targetUrl, {
         headers: { 'User-Agent': 'Possibilities-Companion-App' },
         signal: AbortSignal.timeout(8000),

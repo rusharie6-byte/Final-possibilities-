@@ -484,17 +484,17 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
         setMessages((prev) => [...prev, botMsg]);
         speakReply(replyText);
         audioSynth.playEnergyBloom();
-      } catch (e) {
+      } catch (e: any) {
         console.warn('Companion engine error:', e);
-        const fallback = companionEngine.getOfflineFallback(userQuery);
+        const errMsg = `Notice: ${e?.message || 'Unable to complete request'}. Please verify your network connection or API settings.`;
         const botMsg: ChatMsg = {
           id: `p-${Date.now()}`,
           sender: 'possibilities',
-          text: fallback,
+          text: errMsg,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         };
         setMessages((prev) => [...prev, botMsg]);
-        speakReply(fallback);
+        speakReply(errMsg);
       } finally {
         setIsProcessing(false);
       }
