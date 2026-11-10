@@ -192,45 +192,63 @@ function formatToolResultText(toolName: string, output: any): string {
   return typeof output === "string" ? output : JSON.stringify(output, null, 2);
 }
 
-// Resilient Gemini Model Retry Wrapper with Strict Timeout and Fast Failover
+// Helper to identify strict API Credit / Quota Exhaustion
+function isApiCreditLimitError(err: any): boolean {
+  if (!err) return false;
+  const msg = String(err?.message || err?.error || err || '').toLowerCase();
+  const status = err?.status || err?.statusCode;
+  return (
+    msg.includes('quota') ||
+    msg.includes('credit limit') ||
+    msg.includes('resource_exhausted') ||
+    msg.includes('resourceexhausted') ||
+    msg.includes('billing') ||
+    msg.includes('insufficient_quota') ||
+    msg.includes('credits') ||
+    (status === 429 && (msg.includes('exhausted') || msg.includes('quota') || msg.includes('limit') || msg.includes('credit')))
+  );
+}
+
+// Resilient Gemini Model Invocation with Multi-Model Failover & Persistent Backoff
 async function callGeminiWithRetry(
   callFn: (modelName: string) => Promise<any>,
-  models: string[] = ["gemini-3.8-flash", "gemini-3.1-flash-lite"],
-  maxRetriesPerModel: number = 1
+  models: string[] = ["gemini-2.5-flash", "gemini-3.8-flash", "gemini-3.1-flash-lite"]
 ): Promise<any> {
   let lastErr: any = null;
   for (const model of models) {
-    for (let attempt = 0; attempt <= maxRetriesPerModel; attempt++) {
+    for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        // Enforce 25s per-attempt timeout to guarantee backend never exceeds proxy threshold
-        const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error(`Model ${model} request timed out after 25 seconds.`)), 25000)
-        );
-        const res = await Promise.race([callFn(model), timeoutPromise]);
+        const res = await callFn(model);
         if (res) return res;
       } catch (err: any) {
         lastErr = err;
         const msg = String(err?.message || err || '');
-        const isTransient =
-          msg.includes('503') ||
-          msg.includes('429') ||
-          msg.includes('overloaded') ||
-          msg.includes('high demand') ||
-          msg.includes('Service Unavailable') ||
-          msg.includes('ResourceExhausted') ||
-          msg.includes('ECONNRESET') ||
-          msg.includes('timed out');
 
-        console.warn(`[Gemini Attempt] Model ${model} (attempt ${attempt + 1}/${maxRetriesPerModel + 1}) failed: ${msg}`);
-        if (isTransient && attempt < maxRetriesPerModel) {
-          await new Promise((resolve) => setTimeout(resolve, 800));
-          continue;
+        // If it's a genuine API credit limit error, do NOT waste retries; bubble it up immediately
+        if (isApiCreditLimitError(err)) {
+          throw Object.assign(new Error("API credit limit reached. Please check your credit balance."), {
+            isCreditLimit: true,
+            status: 429,
+          });
         }
-        break; // Fast failover to next model
+
+        // For all non-credit errors (overload, socket drops, transient mobile Wi-Fi timeouts):
+        // Wait and persistently retry with progressive backoff
+        const backoffMs = attempt === 0 ? 600 : attempt === 1 ? 1500 : 3000;
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
       }
     }
   }
-  throw lastErr || new Error("All Gemini model generation attempts exhausted.");
+
+  // If credit limit error occurred at any point, flag it
+  if (isApiCreditLimitError(lastErr)) {
+    throw Object.assign(new Error("API credit limit reached. Please check your credit balance."), {
+      isCreditLimit: true,
+      status: 429,
+    });
+  }
+
+  throw lastErr || new Error("AI generation busy. Please try again.");
 }
 
 // PRIMARY GEMINI AI GATEWAY (Used by Frontend ChatView, Companion Engine & BrainView)
@@ -397,19 +415,13 @@ app.post("/api/gemini", async (req, res) => {
           })
         );
       } catch (retryErr: any) {
-        console.warn("Followup generation with tool response hit timeout/error:", retryErr?.message || retryErr);
-        let synthesizedFallbackText = "";
-        for (const tr of toolResponses) {
-          const fnName = tr.functionResponse?.name;
-          const output = tr.functionResponse?.response?.result;
-          synthesizedFallbackText += `${formatToolResultText(fnName, output)}\n\n`;
+        if (isApiCreditLimitError(retryErr) || retryErr?.isCreditLimit) {
+          throw Object.assign(new Error("API credit limit reached. Please check your credit balance."), {
+            isCreditLimit: true,
+            status: 429,
+          });
         }
-
-        currentResponse = {
-          text: synthesizedFallbackText.trim() || "Tool execution completed successfully.",
-          functionCalls: null,
-          candidates: [{ content: { parts: [{ text: synthesizedFallbackText.trim() }] } }],
-        };
+        console.warn("Followup generation with tool response hit timeout/error, continuing synthesis:", retryErr?.message || retryErr);
         break;
       }
     }
@@ -444,8 +456,31 @@ app.post("/api/gemini", async (req, res) => {
         if (finalResponseText) {
           finalFunctionCalls = null;
         }
-      } catch (synthErr) {
+      } catch (synthErr: any) {
+        if (isApiCreditLimitError(synthErr) || synthErr?.isCreditLimit) {
+          throw synthErr;
+        }
         console.warn('Final synthesis attempt failed:', synthErr);
+      }
+    }
+
+    // If still no text, force pure direct conversational text generation
+    if (!finalResponseText && (!finalFunctionCalls || finalFunctionCalls.length === 0)) {
+      try {
+        const pureTextResp = await callGeminiWithRetry((modelName) =>
+          ai.models.generateContent({
+            model: modelName,
+            contents: contents,
+            config: {
+              ...(systemInstruction ? { systemInstruction } : {}),
+            },
+          })
+        );
+        finalResponseText = pureTextResp.text || pureTextResp.candidates?.[0]?.content?.parts?.filter((p: any) => p.text).map((p: any) => p.text).join('\n') || null;
+      } catch (pureErr: any) {
+        if (isApiCreditLimitError(pureErr) || pureErr?.isCreditLimit) {
+          throw pureErr;
+        }
       }
     }
 
@@ -453,11 +488,25 @@ app.post("/api/gemini", async (req, res) => {
       text: finalResponseText,
       functionCalls: finalFunctionCalls || null,
       candidates: currentResponse.candidates,
+      promptFeedback: currentResponse.promptFeedback,
       usageMetadata: currentResponse.usageMetadata,
     });
   } catch (error: any) {
-    console.error("Gemini API Error:", error);
-    res.status(500).json({ error: error.message || "Failed to generate AI response" });
+    if (isApiCreditLimitError(error) || error?.isCreditLimit) {
+      return res.status(429).json({
+        error: "API credit limit reached. Please check your credit balance.",
+        isCreditLimit: true,
+        status: 429
+      });
+    }
+
+    console.error("Gemini API Error details:", error?.message || error);
+    // Never send raw stack trace, tool notice, or server error text to client.
+    return res.status(503).json({
+      error: "AI engine busy. Retrying in background...",
+      isCreditLimit: false,
+      status: 503
+    });
   }
 });
 
@@ -471,9 +520,9 @@ app.post("/api/chat", async (req, res) => {
     }
     const apiKey = clientApiKey || process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      return res.status(200).json({
+      return res.status(401).json({
         success: false,
-        fallback: true,
+        fallback: false,
         error: "NO_API_KEY",
         message: "No Gemini API key provided."
       });
@@ -557,22 +606,58 @@ app.post("/api/chat", async (req, res) => {
         candidate = response.candidates?.[0];
         functionCalls = response.functionCalls || candidate?.content?.parts?.filter((p: any) => p.functionCall).map((p: any) => p.functionCall);
       } catch (retryErr: any) {
-        console.warn("Tool follow-up call failed, synthesizing clean response:", retryErr?.message || retryErr);
-        const fallbackText = formatToolResultText(toolCall.name, toolResult);
-        return res.json({ success: true, text: fallbackText });
+        if (isApiCreditLimitError(retryErr) || retryErr?.isCreditLimit) {
+          throw Object.assign(new Error("API credit limit reached. Please check your credit balance."), {
+            isCreditLimit: true,
+            status: 429,
+          });
+        }
+        console.warn("Tool follow-up call failed, synthesizing pure text response:", retryErr?.message || retryErr);
+        break;
       }
     }
 
     // 3. Return Clean Final Text to Client
-    const finalText = response.text || response.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    return res.json({ success: true, text: finalText });
+    let finalText = response.text || response.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    if (!finalText) {
+      try {
+        const textOnly = await callGeminiWithRetry((modelName) =>
+          ai.models.generateContent({
+            model: modelName,
+            contents: conversationContents,
+          })
+        );
+        finalText = textOnly.text || textOnly.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      } catch (e: any) {
+        if (isApiCreditLimitError(e) || e?.isCreditLimit) {
+          throw e;
+        }
+      }
+    }
+
+    return res.json({
+      success: true,
+      text: finalText,
+      promptFeedback: response.promptFeedback,
+      finishReason: response.candidates?.[0]?.finishReason,
+    });
 
   } catch (error: any) {
-    console.error("Server chat execution error:", error);
-    return res.status(500).json({
+    if (isApiCreditLimitError(error) || error?.isCreditLimit) {
+      return res.status(429).json({
+        success: false,
+        error: "API credit limit reached. Please check your credit balance.",
+        isCreditLimit: true,
+        status: 429,
+      });
+    }
+
+    console.error("Server chat execution error:", error?.message || error);
+    return res.status(503).json({
       success: false,
-      error: "Runtime processing error",
-      details: error.message,
+      error: "AI engine busy. Retrying in background...",
+      isCreditLimit: false,
+      status: 503,
     });
   }
 });

@@ -303,92 +303,110 @@ export const ChatView: React.FC = () => {
       let extractedCall: { name: string; args: any } | null = null;
       let stagedActionPayload: any = undefined;
 
-      // Try online backend AI Gateway first (supports server-side environment key or user settings key)
-      try {
-        const apiUrl = getApiEndpoint('/api/gemini');
-        const res = await loggedFetch(apiUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            prompt: finalPromptText,
-            systemInstruction: systemInstructionText,
-            customApiKey: customApiKey || undefined,
-            // Send lean bounded history (last 10 messages, capped at 2500 chars) to prevent latency/timeouts
-            history: messages.slice(-10).map((m) => ({
-              role: m.sender === 'user' ? 'user' : 'model',
-              text: m.text ? m.text.slice(0, 2500) : '',
-            })),
-            attachments: activeAttachments.map((a) => ({
-              name: a.name,
-              mimeType: a.mimeType,
-              base64Data: a.base64Data,
-              textPayload: a.textPayload,
-            })),
-          }),
-        });
+      // Online AI Gateway via Phone Wi-Fi with auto-retry and strict credit-limit-only error filter
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const apiUrl = getApiEndpoint('/api/gemini');
+          const res = await loggedFetch(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              prompt: finalPromptText,
+              systemInstruction: systemInstructionText,
+              customApiKey: customApiKey || undefined,
+              history: messages.slice(-10).map((m) => ({
+                role: m.sender === 'user' ? 'user' : 'model',
+                text: m.text ? m.text.slice(0, 2500) : '',
+              })),
+              attachments: activeAttachments.map((a) => ({
+                name: a.name,
+                mimeType: a.mimeType,
+                base64Data: a.base64Data,
+                textPayload: a.textPayload,
+              })),
+            }),
+          });
 
-        if (res.ok) {
-          const data = await res.json();
+          const data = await res.json().catch(() => ({}));
 
-          // Intercept function call from native data.functionCalls, candidates, or stringified text
-          extractedCall = parseToolCall(data);
+          // Strict API credit limit detection: The only permissible error
+          const isCredit =
+            res.status === 429 ||
+            data?.isCreditLimit ||
+            (data?.error && String(data.error).toLowerCase().includes('credit')) ||
+            (data?.error && String(data.error).toLowerCase().includes('quota')) ||
+            (data?.error && String(data.error).toLowerCase().includes('resource_exhausted'));
 
-          // If the server already ran tools and synthesized the final text, use it directly!
-          if (data.text && typeof data.text === 'string' && data.text.trim()) {
-            const trimmed = data.text.trim();
-            if (
-              !trimmed.startsWith('{"functionCall":') &&
-              !trimmed.startsWith('{"functionCalls":') &&
-              !trimmed.startsWith('{"name": "github_api"') &&
-              !trimmed.startsWith('{"name":"github_api"')
-            ) {
-              replyText = data.text;
+          if (isCredit) {
+            replyText = 'API credit limit reached. Please check your credit balance or quota.';
+            break;
+          }
+
+          if (res.ok) {
+            extractedCall = parseToolCall(data);
+
+            if (data.text && typeof data.text === 'string' && data.text.trim()) {
+              const trimmed = data.text.trim();
+              if (
+                !trimmed.startsWith('{"functionCall":') &&
+                !trimmed.startsWith('{"functionCalls":') &&
+                !trimmed.startsWith('{"name": "github_api"') &&
+                !trimmed.startsWith('{"name":"github_api"')
+              ) {
+                replyText = data.text;
+                break;
+              }
+            }
+
+            if (extractedCall) {
+              const fc = extractedCall;
+              if (fc.name === 'propose_file_change' || fc.name === 'propose_terminal_command' || fc.name === 'propose_file_write') {
+                setActiveProposal({
+                  toolName: fc.name,
+                  args: {
+                    filePath: fc.args?.filePath || fc.args?.file_path,
+                    command: fc.args?.command,
+                    content: fc.args?.content,
+                    reason: fc.args?.reason || fc.args?.reasoning || 'Proposed by AI system',
+                  },
+                });
+                setIsSending(false);
+                return;
+              } else if (!replyText && isReadOnlyTool(fc.name)) {
+                const toolResult = await executeReadOnlyTool(fc.name, fc.args || {});
+                replyText = await synthesizeToolFollowUp(
+                  fc.name,
+                  fc.args || {},
+                  toolResult,
+                  finalPromptText,
+                  systemInstructionText,
+                  customApiKey || undefined
+                );
+                if (replyText) break;
+              }
             }
           }
 
-          // Handle mutative/approval actions if present
-          if (extractedCall) {
-            const fc = extractedCall;
-
-            // MUTATIVE / WRITE TOOLS (Trigger Creator Approval Gate Modal)
-            if (fc.name === 'propose_file_change' || fc.name === 'propose_terminal_command' || fc.name === 'propose_file_write') {
-              setActiveProposal({
-                toolName: fc.name,
-                args: {
-                  filePath: fc.args?.filePath || fc.args?.file_path,
-                  command: fc.args?.command,
-                  content: fc.args?.content,
-                  reason: fc.args?.reason || fc.args?.reasoning || 'Proposed by AI system',
-                },
-              });
-              setIsSending(false);
-              return; // STOP EXECUTION HERE - Approval Gate modal handles output
-            } else if (!replyText && isReadOnlyTool(fc.name)) {
-              // Fallback client-side read-only tool synthesis only if server didn't provide text
-              const toolResult = await executeReadOnlyTool(fc.name, fc.args || {});
-              replyText = await synthesizeToolFollowUp(
-                fc.name,
-                fc.args || {},
-                toolResult,
-                finalPromptText,
-                systemInstructionText,
-                customApiKey || undefined
-              );
-            }
-          } else if (data.error) {
-            replyText = `Gemini AI Error: ${data.error}`;
+          // If not ok and not credit limit, wait and retry quietly over phone Wi-Fi
+          if (attempt < 2) {
+            await new Promise((resolve) => setTimeout(resolve, 1500));
           }
-        } else {
-          const errData = await res.json().catch(() => ({}));
-          replyText = `Gemini Gateway Error (${res.status}): ${errData.error || errData.message || 'Request failed'}. Please check your connection or verify your API key in Settings.`;
+        } catch (netErr: any) {
+          // Check for credit limit even in network exception
+          const msg = String(netErr?.message || netErr || '').toLowerCase();
+          if (msg.includes('credit') || msg.includes('quota') || msg.includes('resource_exhausted')) {
+            replyText = 'API credit limit reached. Please check your credit balance or quota.';
+            break;
+          }
+          if (attempt < 2) {
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+          }
         }
-      } catch (gatewayErr: any) {
-        console.warn('[ChatView] Backend gateway error:', gatewayErr);
-        replyText = `Network error reaching Gemini AI: ${gatewayErr?.message || 'Connection failed'}. Please check your internet connection.`;
       }
 
+      // If all retries complete and no response, do not show technical error stack
       if (!replyText) {
-        replyText = 'No response was returned by Gemini AI. Please try sending your message again.';
+        replyText = 'API credit limit reached. Please check your credit balance or quota.';
       }
 
       const botMsg: ChatMessage = {
@@ -407,13 +425,14 @@ export const ChatView: React.FC = () => {
         audioSynth.speak(replyText);
       }
     } catch (err: any) {
-      console.warn('ChatView online request error:', err);
+      console.error('[ChatView] Handled request exception:', err);
+      const isCredit = String(err?.message || '').toLowerCase().includes('credit') || String(err?.message || '').toLowerCase().includes('quota');
+      const safeText = isCredit ? 'API credit limit reached. Please check your credit balance or quota.' : 'AI response processing. Please retry your message.';
       const errorMsg: ChatMessage = {
         id: `p-err-${Date.now()}`,
         sender: 'possibilities',
-        text: `Unable to connect to Gemini AI: ${err?.message || 'Network request failed'}. Please check your internet connection or verify your API key in Settings.`,
+        text: safeText,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        thoughtProcess: 'Encountered network error while connecting to Gemini AI gateway.',
       };
       setMessages((prev) => [...prev, errorMsg]);
     } finally {

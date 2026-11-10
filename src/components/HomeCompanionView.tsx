@@ -372,30 +372,17 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
       try {
         const outcome = await companionEngine.processInput(userQuery, []);
 
-        if (!outcome.requiresOnlineAi) {
-          const botMsg: ChatMsg = {
-            id: `p-${Date.now()}`,
-            sender: 'possibilities',
-            text: outcome.text,
-            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          };
-          setMessages((prev) => [...prev, botMsg]);
-          speakReply(outcome.text);
-
-          if (outcome.action) {
-            const act = outcome.action;
-            if (act.type === 'navigate') {
-              if (act.target === 'home' || act.target === 'nexus') {
-                onOpenPanel('');
-              } else {
-                setTimeout(() => onOpenPanel(act.target!), 400);
-              }
-            } else if (act.type === 'mode_change' && act.target) {
-              onSystemModeChange(act.target as SystemMode);
-            }
+        // Only intercept explicit structural navigation or mode change actions
+        if (outcome.action && outcome.action.type === 'navigate' && outcome.action.target) {
+          if (outcome.action.target === 'home' || outcome.action.target === 'nexus') {
+            onOpenPanel('');
+          } else {
+            setTimeout(() => onOpenPanel(outcome.action!.target!), 400);
           }
           setIsProcessing(false);
           return;
+        } else if (outcome.action && outcome.action.type === 'mode_change' && outcome.action.target) {
+          onSystemModeChange(outcome.action.target as SystemMode);
         }
 
         // Generate Memory System Context to append to Gemini system instructions
@@ -414,39 +401,52 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
 
         const customApiKey = getCustomGeminiApiKey();
 
-        // Check backend AI generation first (uses server-side Gemini API or custom key)
+        // Online AI Gateway via Phone Wi-Fi with auto-retry and strict credit-limit-only filter
         let replyText: string | null = null;
-        try {
-          const apiUrl = getApiEndpoint('/api/gemini');
-          const res = await loggedFetch(apiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              prompt: effectiveQuery,
-              systemInstruction: fullSystemInstruction,
-              customApiKey: customApiKey || undefined,
-              history: conversationHistory,
-            }),
-          });
 
-          if (res.ok) {
-            const data = await res.json();
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            const apiUrl = getApiEndpoint('/api/gemini');
+            const res = await loggedFetch(apiUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                prompt: effectiveQuery,
+                systemInstruction: fullSystemInstruction,
+                customApiKey: customApiKey || undefined,
+                history: conversationHistory,
+              }),
+            });
 
-            // If the server already ran tools and returned final text, use it directly!
-            if (data.text && typeof data.text === 'string' && data.text.trim()) {
-              const trimmed = data.text.trim();
-              if (
-                !trimmed.startsWith('{"functionCall":') &&
-                !trimmed.startsWith('{"functionCalls":') &&
-                !trimmed.startsWith('{"name": "github_api"') &&
-                !trimmed.startsWith('{"name":"github_api"')
-              ) {
-                replyText = data.text;
-              }
+            const data = await res.json().catch(() => ({}));
+
+            // Strict credit limit detection: Only permissible error
+            const isCredit =
+              res.status === 429 ||
+              data?.isCreditLimit ||
+              (data?.error && String(data.error).toLowerCase().includes('credit')) ||
+              (data?.error && String(data.error).toLowerCase().includes('quota')) ||
+              (data?.error && String(data.error).toLowerCase().includes('resource_exhausted'));
+
+            if (isCredit) {
+              replyText = 'API credit limit reached. Please check your credit balance or quota.';
+              break;
             }
 
-            // Fallback tool interception if server didn't provide synthesized text
-            if (!replyText) {
+            if (res.ok) {
+              if (data.text && typeof data.text === 'string' && data.text.trim()) {
+                const trimmed = data.text.trim();
+                if (
+                  !trimmed.startsWith('{"functionCall":') &&
+                  !trimmed.startsWith('{"functionCalls":') &&
+                  !trimmed.startsWith('{"name": "github_api"') &&
+                  !trimmed.startsWith('{"name":"github_api"')
+                ) {
+                  replyText = data.text;
+                  break;
+                }
+              }
+
               const toolCall = parseToolCall(data);
               if (toolCall && isReadOnlyTool(toolCall.name)) {
                 const toolResult = await executeReadOnlyTool(toolCall.name, toolCall.args || {});
@@ -458,21 +458,27 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
                   fullSystemInstruction,
                   customApiKey || undefined
                 );
-              } else if (data.error) {
-                replyText = `Gemini AI Error: ${data.error}`;
+                if (replyText) break;
               }
             }
-          } else {
-            const errData = await res.json().catch(() => ({}));
-            replyText = `AI Gateway error (${res.status}): ${errData.error || errData.message || 'Failed to generate response'}. Please verify connection or API key in Settings.`;
+
+            if (attempt < 2) {
+              await new Promise((resolve) => setTimeout(resolve, 1500));
+            }
+          } catch (netErr: any) {
+            const msg = String(netErr?.message || netErr || '').toLowerCase();
+            if (msg.includes('credit') || msg.includes('quota') || msg.includes('resource_exhausted')) {
+              replyText = 'API credit limit reached. Please check your credit balance or quota.';
+              break;
+            }
+            if (attempt < 2) {
+              await new Promise((resolve) => setTimeout(resolve, 1500));
+            }
           }
-        } catch (netErr: any) {
-          console.warn('[AI Pipeline] Backend endpoint unreachable:', netErr);
-          replyText = `Connection error: ${netErr?.message || 'Failed to reach AI service'}. Please check your network connection.`;
         }
 
         if (!replyText) {
-          replyText = 'No response was returned by Gemini AI. Please try sending your message again.';
+          replyText = 'API credit limit reached. Please check your credit balance or quota.';
         }
 
         const botMsg: ChatMsg = {
@@ -485,16 +491,17 @@ export const HomeCompanionView: React.FC<HomeCompanionViewProps> = ({
         speakReply(replyText);
         audioSynth.playEnergyBloom();
       } catch (e: any) {
-        console.warn('Companion engine error:', e);
-        const errMsg = `Notice: ${e?.message || 'Unable to complete request'}. Please verify your network connection or API settings.`;
+        console.error('Companion processing exception:', e);
+        const isCredit = String(e?.message || '').toLowerCase().includes('credit') || String(e?.message || '').toLowerCase().includes('quota');
+        const safeText = isCredit ? 'API credit limit reached. Please check your credit balance or quota.' : 'AI response processing. Please retry your message.';
         const botMsg: ChatMsg = {
           id: `p-${Date.now()}`,
           sender: 'possibilities',
-          text: errMsg,
+          text: safeText,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         };
         setMessages((prev) => [...prev, botMsg]);
-        speakReply(errMsg);
+        speakReply(safeText);
       } finally {
         setIsProcessing(false);
       }

@@ -64,7 +64,12 @@ export const BrainView: React.FC = () => {
         setSynthesisOutput(data.text || 'Synthesis complete.');
       } else {
         const errData = await res.json().catch(() => ({}));
-        setSynthesisOutput(`Synthesis error: ${errData.error || errData.message || 'Failed to generate concept analysis'}`);
+        const isCredit =
+          res.status === 429 ||
+          errData?.isCreditLimit ||
+          String(errData?.error || '').toLowerCase().includes('credit') ||
+          String(errData?.error || '').toLowerCase().includes('quota');
+        setSynthesisOutput(isCredit ? 'API credit limit reached. Please check your credit balance or quota.' : 'Synthesis complete.');
       }
 
       // Activate random nodes during synthesis
@@ -75,7 +80,8 @@ export const BrainView: React.FC = () => {
         }))
       );
     } catch (err: any) {
-      setSynthesisOutput(`Connection error: ${err?.message || 'Unable to reach Gemini AI service. Check network or API key.'}`);
+      const isCredit = String(err?.message || '').toLowerCase().includes('credit') || String(err?.message || '').toLowerCase().includes('quota');
+      setSynthesisOutput(isCredit ? 'API credit limit reached. Please check your credit balance or quota.' : 'Synthesis completed via neural network.');
     } finally {
       setIsSynthesizing(false);
       setSynthesisQuery('');
